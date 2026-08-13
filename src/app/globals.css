@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #00B85C;
+  --color-primary-light: #F0FFF7;
+  --color-primary-hover: #00CF68;
+  --color-primary-dark: #007A3D;
+  --color-accent: #F59E0B;
+  --color-accent-light: #FFFBEB;
+  --color-surface: #FFFFFF;
+  --color-surface-secondary: #F9FAFB;
+  --color-surface-tertiary: #F4F4F5;
+  --color-border: #E4E4E7;
+  --color-border-strong: #D4D4D8;
+  --color-text-primary: #09090B;
+  --color-text-secondary: #3F3F46;
+  --color-text-muted: #A1A1AA;
+  --color-badge-green-bg: #DCFCE7;
+  --color-badge-green-text: #16A34A;
+  --color-badge-amber-bg: #FEF9C3;
+  --color-badge-amber-text: #92400E;
+  --color-badge-red-bg: #FEE2E2;
+  --color-badge-red-text: #B91C1C;
+  --color-badge-blue-bg: #DBEAFE;
+  --color-badge-blue-text: #1D4ED8;
+  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+    scrollbar-width: none;
+  }
+
+  *::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background: #0F0F0F;
+    color: #09090B;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  button {
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
+  input, textarea {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+}
+
+@layer utilities {
+  .glass {
+    background: rgba(255, 255, 255, 0.72);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+
+  .glass-dark {
+    background: rgba(15, 15, 15, 0.72);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+
+  .shadow-card {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+  }
+
+  .shadow-card-lg {
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.02);
+  }
+
+  .shadow-primary {
+    box-shadow: 0 8px 24px rgba(0, 184, 92, 0.25), 0 2px 6px rgba(0, 184, 92, 0.12);
+  }
+
+  .text-gradient-primary {
+    background: linear-gradient(135deg, #00B85C 0%, #007A3D 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0);
+  }
+
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+}
