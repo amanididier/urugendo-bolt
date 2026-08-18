@@ -36,13 +36,15 @@ export interface Operator {
   branches?: string[]; // ["Musanze", "Kigali", "Rubavu", "Nyagatare", "Gicumbi"]
 }
 
-export interface AgencyBranch {
+export interface AgencyBranchObject {
   id: string;
   agency_id?: string;
   name: string;
   location?: string;
   created_at?: string;
 }
+
+export type AgencyBranch = string | AgencyBranchObject;
 
 // ==========================================
 // 3. Extended Trip / Departure Types
