@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -23,7 +23,7 @@ interface ManifestTrip {
   driverName: string;
   from: string;
   to: string;
-  time: string; // ETA or Departure time
+  time: string;
   capacity: number;
   urugendoPassengers: number;
   status: string;
@@ -87,6 +87,9 @@ const BRANCHES: AgencyBranch[] = [
   "Gicumbi",
 ];
 
+const getBranchName = (branch: AgencyBranch): string =>
+  typeof branch === "string" ? branch : branch.name;
+
 export default function AgencyManifestPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<"incoming" | "outgoing">(
@@ -99,8 +102,19 @@ export default function AgencyManifestPage() {
   });
   const [savedFeedback, setSavedFeedback] = useState<string | null>(null);
 
+  useEffect(() => {
+    const savedBranch = localStorage.getItem("urugendo_branch");
+    if (savedBranch) {
+      setStationBranch(savedBranch);
+    }
+  }, []);
+
+  const handleBranchChange = (newBranch: string) => {
+    setStationBranch(newBranch);
+    localStorage.setItem("urugendo_branch", newBranch);
+  };
+
   const handleSaveEmptySeats = (tripId: string) => {
-    const seats = emptySeats[tripId] ?? 0;
     setSavedFeedback(tripId);
     setTimeout(() => setSavedFeedback(null), 2500);
   };
@@ -123,17 +137,18 @@ export default function AgencyManifestPage() {
             <div className="flex items-center gap-2 mt-0.5">
               <Building2 size={14} className="text-slate-400" />
               <select
-                value={stationBranch}
-                onChange={(e) =>
-                  setStationBranch(e.target.value as AgencyBranch)
-                }
+                value={getBranchName(stationBranch)}
+                onChange={(e) => handleBranchChange(e.target.value)}
                 className="bg-slate-800 text-white text-xs font-bold rounded px-2 py-0.5 border border-slate-700 focus:outline-hidden"
               >
-                {BRANCHES.map((b) => (
-                  <option key={b} value={b}>
-                    Branch: {b}
-                  </option>
-                ))}
+                {BRANCHES.map((b) => {
+                  const name = getBranchName(b);
+                  return (
+                    <option key={name} value={name}>
+                      Branch: {name}
+                    </option>
+                  );
+                })}
               </select>
             </div>
           </div>

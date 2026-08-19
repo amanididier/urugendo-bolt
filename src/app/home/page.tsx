@@ -406,48 +406,60 @@ export default function HomePage() {
 
         <div className="space-y-2.5">
           {liveTrips.length > 0
-            ? liveTrips.slice(0, 4).map((trip, i) => (
-                <motion.button
-                  key={trip.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.4 + i * 0.06 }}
-                  onClick={() => handleLiveDeparture(trip)}
-                  className="w-full bg-white rounded-2xl border border-border p-3.5 flex items-center gap-3 active:scale-[0.98] active:bg-primary-light transition-all shadow-card text-left"
-                >
-                  <div
-                    className="w-11 h-11 rounded-2xl flex items-center justify-center text-lg flex-shrink-0"
-                    style={{
-                      background:
-                        trip.operator.gradient ||
-                        "linear-gradient(135deg, #FF6B1A, #FF8800)",
-                    }}
+            ? liveTrips.slice(0, 4).map((trip, i) => {
+                const op = trip.operator as any;
+                const operatorName =
+                  typeof op === "string" ? op : op?.name || "Bus Operator";
+                const operatorGradient =
+                  typeof op === "object" && op?.gradient
+                    ? op.gradient
+                    : "linear-gradient(135deg, #FF6B1A, #FF8800)";
+                const operatorIcon =
+                  typeof op === "object" && (op?.emoji || op?.logo)
+                    ? op.emoji || op.logo
+                    : "🚌";
+
+                return (
+                  <motion.button
+                    key={trip.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.4 + i * 0.06 }}
+                    onClick={() => handleLiveDeparture(trip)}
+                    className="w-full bg-white rounded-2xl border border-border p-3.5 flex items-center gap-3 active:scale-[0.98] active:bg-primary-light transition-all shadow-card text-left"
                   >
-                    {trip.operator.emoji || trip.operator.logo || "🚌"}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[14px] font-bold text-text-primary">
-                      {trip.from} → {trip.to}
+                    <div
+                      className="w-11 h-11 rounded-2xl flex items-center justify-center text-lg flex-shrink-0"
+                      style={{
+                        background: operatorGradient,
+                      }}
+                    >
+                      {operatorIcon}
                     </div>
-                    <div className="text-[12px] text-text-muted mt-0.5">
-                      <span className="text-primary font-semibold">
-                        {trip.operator.name}
-                      </span>
-                      <span className="mx-1.5">·</span>
-                      <span>{trip.departureTime}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[14px] font-bold text-text-primary">
+                        {trip.from} → {trip.to}
+                      </div>
+                      <div className="text-[12px] text-text-muted mt-0.5">
+                        <span className="text-primary font-semibold">
+                          {operatorName}
+                        </span>
+                        <span className="mx-1.5">·</span>
+                        <span>{trip.departureTime}</span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-[16px] font-extrabold text-primary">
-                      {formatPrice(trip.price)}
+                    <div className="text-right">
+                      <div className="text-[16px] font-extrabold text-primary">
+                        {formatPrice(trip.price)}
+                      </div>
+                      <div className="text-[11px] text-badge-green-text font-medium">
+                        {trip.availableSeats} {t("seats", language)}
+                      </div>
                     </div>
-                    <div className="text-[11px] text-badge-green-text font-medium">
-                      {trip.availableSeats} {t("seats", language)}
-                    </div>
-                  </div>
-                </motion.button>
-              ))
-            : liveRoutes.map((route, i) => (
+                  </motion.button>
+                );
+              })
+            : liveRoutes.map((route) => (
                 <div
                   key={route.id}
                   onClick={() => handleRouteClick(route)}

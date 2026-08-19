@@ -1,4 +1,10 @@
 // ==========================================
+// Core App & Utility Types
+// ==========================================
+export type Language = "EN" | "RW";
+export type PaymentMethod = "momo" | "card" | "cash" | string;
+
+// ==========================================
 // 1. Extended City & Route Types
 // ==========================================
 export interface City {
@@ -51,19 +57,19 @@ export type AgencyBranch = string | AgencyBranchObject;
 // ==========================================
 export interface Trip {
   id: string;
-  operator: Operator;
+  operator?: Operator | string;
   from: string;
   to: string;
   departureTime: string;
-  arrivalTime: string;
-  duration: string;
+  arrivalTime?: string;
+  duration?: string;
   price: number;
-  currency: string;
-  availableSeats: number;
-  totalSeats: number;
-  busType: "Coaster" | "Yutong" | string; // Coaster = 29 seats
-  amenities: string[];
-  date: string;
+  currency?: string;
+  availableSeats?: number;
+  totalSeats?: number;
+  busType?: "Coaster" | "Yutong" | string; // Coaster = 29 seats
+  amenities?: string[];
+  date?: string;
   plateNumber?: string;
   driverName?: string;
   departureStation?: string;
@@ -77,6 +83,9 @@ export interface Trip {
     | "cancelled"
     | "delayed"
     | string;
+  routeFrom?: string;
+  terminalFrom?: string;
+  terminalTo?: string;
 }
 
 // ==========================================
@@ -84,18 +93,19 @@ export interface Trip {
 // ==========================================
 export interface Booking {
   id: string;
-  trip: Trip;
-  seat: string;
-  passengerName: string;
-  passengerPhone: string;
+  trip?: Trip;
+  seat?: string;
+  seatNumber?: string;
+  passengerName?: string;
+  passengerPhone?: string;
   momoAccountName?: string;
   momoPhoneNumber?: string;
   paymentTime?: string;
-  shortCode: string;
-  paymentMethod: string;
-  totalAmount: number;
+  shortCode?: string;
+  paymentMethod?: string;
+  totalAmount?: number;
   bookingFee?: number;
-  status:
+  status?:
     | "pending"
     | "confirmed"
     | "rejected"
@@ -105,7 +115,8 @@ export interface Booking {
     | "boarded"
     | "used"
     | string;
-  bookingDate: string;
+  bookingDate?: string;
+  createdAt?: string;
   userId?: string;
   verifiedByAgentId?: string;
 }
@@ -115,13 +126,17 @@ export interface Booking {
 // ==========================================
 export interface UserProfile {
   id: string;
-  fullName: string;
-  phone: string;
+  fullName?: string;
+  name?: string;
+  phone?: string;
   email?: string;
-  role?: "passenger" | "agency" | "admin";
+  role?: "passenger" | "agency" | "admin" | "agent" | string;
   branch?: string; // Station branch (e.g., Musanze, Kigali)
   createdAt?: string;
 }
+
+// Backward compatibility alias
+export type User = UserProfile;
 
 export interface AppNotification {
   id: string;
@@ -141,3 +156,6 @@ export interface SearchFilters {
   maxPrice?: number;
   operatorId?: string;
 }
+
+// Backward compatibility alias
+export type SearchFilter = SearchFilters;

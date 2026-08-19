@@ -54,11 +54,9 @@ const addMinutesToTime = (timeStr: string, minutesToAdd: number): string => {
   const hours = parseInt(hStr, 10);
   const minutes = parseInt(mStr, 10);
   if (isNaN(hours) || isNaN(minutes)) return "";
-
   const date = new Date();
   date.setHours(hours, minutes, 0, 0);
   date.setMinutes(date.getMinutes() + minutesToAdd);
-
   const newH = String(date.getHours()).padStart(2, "0");
   const newM = String(date.getMinutes()).padStart(2, "0");
   return `${newH}:${newM}`;
@@ -70,15 +68,12 @@ const calculateDurationMinutes = (timeFrom: string, timeTo: string): number => {
     return 0;
   const [h1, m1] = timeFrom.split(":").map(Number);
   const [h2, m2] = timeTo.split(":").map(Number);
-
   let totalMin1 = h1 * 60 + m1;
   let totalMin2 = h2 * 60 + m2;
-
   // Handle midnight crossover
   if (totalMin2 < totalMin1) {
     totalMin2 += 24 * 60;
   }
-
   return totalMin2 - totalMin1;
 };
 
@@ -91,7 +86,6 @@ export default function AgencySchedulePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [showMoMoModal, setShowMoMoModal] = useState(false);
-
   const today = new Date().toISOString().split("T")[0];
 
   // Scheduling Form State with flexible dynamic inputs
@@ -109,10 +103,11 @@ export default function AgencySchedulePage() {
 
   const loadTrips = useCallback(async () => {
     setLoading(true);
-    const data = await fetchTripsByDate(today);
-    setTrips(data);
+    const todayStr = new Date().toISOString().split("T")[0];
+    const data = await fetchTripsByDate(todayStr);
+    setTrips(data || []);
     setLoading(false);
-  }, [today]);
+  }, []);
 
   useEffect(() => {
     loadTrips();
@@ -120,17 +115,14 @@ export default function AgencySchedulePage() {
 
   useEffect(() => {
     if (userRole !== "agent") {
-      router.push("/login");
+      router.push("/agency/login");
     }
   }, [userRole, router]);
 
   // Route Auto-lookup logic for duration and price
   useEffect(() => {
     if (!form.routeFrom || !form.routeTo) return;
-
     const rKey = getRouteKey(form.routeFrom, form.routeTo);
-
-    // Check saved routes in localStorage first, then fallback to defaults
     let routeInfo = INITIAL_ROUTE_DEFAULTS[rKey];
     if (typeof window !== "undefined") {
       const stored = localStorage.getItem(`route_meta_${rKey}`);
@@ -142,20 +134,30 @@ export default function AgencySchedulePage() {
         }
       }
     }
-
     if (routeInfo) {
-      if (routeInfo.price && form.price === "") {
-        setForm((prev) => ({ ...prev, price: String(routeInfo.price) }));
-      }
-      if (routeInfo.durationMinutes && form.time) {
-        const autoArrival = addMinutesToTime(
-          form.time,
-          routeInfo.durationMinutes,
-        );
-        if (autoArrival) {
-          setForm((prev) => ({ ...prev, arrivalTime: autoArrival }));
+      setForm((prev) => {
+        let updatedPrice = prev.price;
+        let updatedArrival = prev.arrivalTime;
+        if (routeInfo.price && prev.price === "") {
+          updatedPrice = String(routeInfo.price);
         }
-      }
+        if (routeInfo.durationMinutes && prev.time) {
+          const autoArrival = addMinutesToTime(
+            prev.time,
+            routeInfo.durationMinutes,
+          );
+          if (autoArrival) {
+            updatedArrival = autoArrival;
+          }
+        }
+        if (
+          updatedPrice === prev.price &&
+          updatedArrival === prev.arrivalTime
+        ) {
+          return prev;
+        }
+        return { ...prev, price: updatedPrice, arrivalTime: updatedArrival };
+      });
     }
   }, [form.routeFrom, form.routeTo, form.time]);
 
@@ -176,13 +178,11 @@ export default function AgencySchedulePage() {
       setError("Please fill in all required route and vehicle details");
       return;
     }
-
     const seatsNum = parseInt(form.totalSeats, 10);
     if (isNaN(seatsNum) || seatsNum < 1) {
       setError("Enter a valid total seat count");
       return;
     }
-
     const priceNum = parseInt(form.price, 10);
     if (isNaN(priceNum) || priceNum < 1) {
       setError("Enter a valid ticket price");
@@ -197,6 +197,7 @@ export default function AgencySchedulePage() {
       form.time,
       form.arrivalTime,
     );
+
     if (calculatedDuration > 0) {
       const rKey = getRouteKey(form.routeFrom, form.routeTo);
       if (typeof window !== "undefined") {
@@ -211,8 +212,8 @@ export default function AgencySchedulePage() {
     }
 
     const tripId = await createTrip({
-      routeFrom: form.routeFrom,
-      routeTo: form.routeTo,
+      from: form.routeFrom,
+      to: form.routeTo,
       departureTime: form.time,
       arrivalTime: form.arrivalTime || form.time,
       travelDate: form.date,
@@ -290,7 +291,7 @@ export default function AgencySchedulePage() {
           Schedule Engine
         </h1>
         <p className="text-[13px] text-white/80">
-          Smart route dispatching & departure management
+          Smart route dispatching &amp; departure management
         </p>
       </div>
 
@@ -306,7 +307,7 @@ export default function AgencySchedulePage() {
         {/* Departure List */}
         {loading ? (
           <div className="text-center py-12 text-slate-500 text-[13px]">
-            Loading today's scheduled departures...
+            Loading today&apos;s scheduled departures...
           </div>
         ) : trips.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-200 p-6">
@@ -315,7 +316,7 @@ export default function AgencySchedulePage() {
               No departures scheduled
             </p>
             <p className="text-[12px] text-slate-400 mt-1">
-              Tap "Add New Departure" to dispatch a bus on a route.
+              Tap &quot;Add New Departure&quot; to dispatch a bus on a route.
             </p>
           </div>
         ) : (
@@ -405,7 +406,7 @@ export default function AgencySchedulePage() {
                   New Departure
                 </h2>
                 <p className="text-[12px] text-slate-500">
-                  Smart route auto-calculation & dispatch
+                  Smart route auto-calculation &amp; dispatch
                 </p>
               </div>
               <button
@@ -477,14 +478,9 @@ export default function AgencySchedulePage() {
 
               {/* Estimated Arrival Time */}
               <div>
-                <div className="flex items-center justify-between">
-                  <label className="text-[12px] font-bold text-slate-600">
-                    Estimated Arrival Time
-                  </label>
-                  <span className="text-[10px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-                    Auto-calculated
-                  </span>
-                </div>
+                <label className="text-[12px] font-bold text-slate-600">
+                  Arrival Time (Est.)
+                </label>
                 <input
                   type="time"
                   value={form.arrivalTime}
@@ -495,62 +491,41 @@ export default function AgencySchedulePage() {
                 />
               </div>
 
-              {/* Bus Type Selection */}
-              <div>
-                <label className="text-[12px] font-bold text-slate-600">
-                  Bus Model & Specification
-                </label>
-                <div className="grid grid-cols-2 gap-3 mt-1.5">
-                  <button
-                    type="button"
-                    onClick={() => handleBusTypeChange("coaster")}
-                    className={`py-2.5 px-3 rounded-xl border text-[13px] font-bold flex flex-col items-center gap-1 transition-all ${
-                      form.busType === "coaster"
-                        ? "border-primary bg-primary/5 text-primary shadow-sm"
-                        : "border-slate-200 bg-slate-50 text-slate-600"
-                    }`}
-                  >
-                    <span>Toyota Coaster</span>
-                    <span className="text-[10px] font-normal text-slate-500">
-                      29 Seats (Default)
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleBusTypeChange("coach")}
-                    className={`py-2.5 px-3 rounded-xl border text-[13px] font-bold flex flex-col items-center gap-1 transition-all ${
-                      form.busType === "coach"
-                        ? "border-primary bg-primary/5 text-primary shadow-sm"
-                        : "border-slate-200 bg-slate-50 text-slate-600"
-                    }`}
-                  >
-                    <span>Youtong / Large Coach</span>
-                    <span className="text-[10px] font-normal text-slate-500">
-                      45 Seats
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Plate Number */}
-              <div>
-                <label className="text-[12px] font-bold text-slate-600">
-                  Vehicle Plate Number
-                </label>
-                <input
-                  type="text"
-                  value={form.plate}
-                  onChange={(e) => setForm({ ...form, plate: e.target.value })}
-                  placeholder="e.g. RAC 890 B"
-                  className="w-full mt-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[14px] text-slate-800 font-mono font-bold focus:bg-white focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none uppercase"
-                />
-              </div>
-
-              {/* Total Seats & Price (Fully Editable String Input Handling) */}
+              {/* Bus Type & Total Seats */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[12px] font-bold text-slate-600">
-                    Total Capacity (Seats)
+                    Bus Category
+                  </label>
+                  <div className="grid grid-cols-2 gap-1 mt-1 bg-slate-100 p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => handleBusTypeChange("coaster")}
+                      className={`py-1.5 rounded-lg text-[12px] font-bold transition-all ${
+                        form.busType === "coaster"
+                          ? "bg-white text-primary shadow-sm"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      Coaster
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleBusTypeChange("coach")}
+                      className={`py-1.5 rounded-lg text-[12px] font-bold transition-all ${
+                        form.busType === "coach"
+                          ? "bg-white text-primary shadow-sm"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      Coach
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[12px] font-bold text-slate-600">
+                    Total Seats
                   </label>
                   <input
                     type="number"
@@ -562,9 +537,31 @@ export default function AgencySchedulePage() {
                     className="w-full mt-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[14px] text-slate-800 font-medium focus:bg-white focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none"
                   />
                 </div>
+              </div>
+
+              {/* Vehicle Plate & Price */}
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[12px] font-bold text-slate-600">
-                    Price per Seat (RWF)
+                    Plate Number
+                  </label>
+                  <input
+                    type="text"
+                    value={form.plate}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        plate: e.target.value.toUpperCase(),
+                      })
+                    }
+                    placeholder="RAC 123 A"
+                    className="w-full mt-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[14px] text-slate-800 font-mono font-bold focus:bg-white focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[12px] font-bold text-slate-600">
+                    Price (RWF)
                   </label>
                   <input
                     type="number"
@@ -573,13 +570,13 @@ export default function AgencySchedulePage() {
                       setForm({ ...form, price: e.target.value })
                     }
                     placeholder="3500"
-                    className="w-full mt-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[14px] text-slate-800 font-medium focus:bg-white focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none"
+                    className="w-full mt-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[14px] text-slate-800 font-bold focus:bg-white focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none"
                   />
                 </div>
               </div>
 
               {error && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-[12px] text-red-600 flex items-center gap-2">
+                <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-[12px] font-medium">
                   <AlertCircle size={16} className="shrink-0" />
                   <span>{error}</span>
                 </div>
@@ -588,11 +585,15 @@ export default function AgencySchedulePage() {
               <button
                 onClick={handleCreate}
                 disabled={saving}
-                className="w-full bg-primary text-white rounded-xl py-3.5 font-bold shadow-md hover:bg-primary/95 transition-all disabled:opacity-50 mt-2"
+                className="w-full mt-2 bg-primary text-white font-bold py-3.5 rounded-2xl shadow-md hover:bg-primary/95 active:scale-[0.99] transition-all text-[14px] flex items-center justify-center gap-2"
               >
-                {saving
-                  ? "Publishing Departure..."
-                  : "Confirm & Create Departure"}
+                {saving ? (
+                  "Dispatching..."
+                ) : (
+                  <>
+                    <CheckCircle2 size={18} /> Confirm &amp; Dispatch Departure
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -601,49 +602,53 @@ export default function AgencySchedulePage() {
 
       {/* MoMo Merchant Codes Modal */}
       {showMoMoModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl border border-slate-100">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
-              <h3 className="text-[16px] font-extrabold text-slate-800">
-                Virunga Express MoMo Codes
-              </h3>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 font-bold text-[14px]">
+                  💳
+                </div>
+                <h3 className="text-[16px] font-extrabold text-slate-800">
+                  MoMo Merchant Codes
+                </h3>
+              </div>
               <button
                 onClick={() => setShowMoMoModal(false)}
-                className="p-1 rounded-full text-slate-400 hover:text-slate-600"
+                className="p-1 rounded-full hover:bg-slate-100 text-slate-400"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <p className="text-[12px] text-slate-500 mb-4">
-              Standard MoMo Pay merchant codes for terminal ticketing & agency
-              counter transactions:
+            <p className="text-[12px] text-slate-500 mb-3">
+              Official station merchant codes for ticket collection payment
             </p>
 
-            <div className="space-y-2.5 mb-5">
-              {VIRUNGA_MOMO_CODES.map((item, idx) => (
+            <div className="space-y-2 mb-4">
+              {VIRUNGA_MOMO_CODES.map((momo, idx) => (
                 <div
                   key={idx}
-                  className="bg-amber-50/60 border border-amber-200/80 rounded-2xl p-3 flex items-center justify-between"
+                  className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-between"
                 >
                   <div>
-                    <div className="text-[13px] font-bold text-slate-800">
-                      {item.terminal}
-                    </div>
-                    <div className="text-[11px] font-mono text-slate-500">
-                      USSD: {item.ussd}
-                    </div>
+                    <p className="text-[12px] font-bold text-slate-800">
+                      {momo.terminal}
+                    </p>
+                    <p className="text-[11px] font-mono text-slate-500">
+                      {momo.ussd}
+                    </p>
                   </div>
-                  <div className="bg-amber-400 text-slate-900 font-mono font-extrabold text-[14px] px-2.5 py-1 rounded-xl">
-                    {item.code}
-                  </div>
+                  <span className="text-[14px] font-black font-mono text-primary bg-primary/10 px-2.5 py-1 rounded-lg">
+                    {momo.code}
+                  </span>
                 </div>
               ))}
             </div>
 
             <button
               onClick={() => setShowMoMoModal(false)}
-              className="w-full bg-slate-100 text-slate-700 py-2.5 rounded-xl text-[13px] font-bold hover:bg-slate-200 transition-colors"
+              className="w-full bg-slate-900 text-white font-bold py-2.5 rounded-xl text-[13px]"
             >
               Close
             </button>

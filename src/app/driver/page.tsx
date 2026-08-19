@@ -61,7 +61,7 @@ export default function DriverDashboard() {
   }
 
   const currentTrip = trips.find(t => t.status === 'departed' || t.status === 'boarding') || trips[0];
-  const currentTripBookings = currentTrip ? bookings.filter(b => b.trip.id === currentTrip.id) : [];
+  const currentTripBookings = currentTrip ? bookings.filter(b => b.trip?.id === currentTrip.id) : [];
   const pendingPassengers = currentTrip ? currentTripBookings.filter(b => !verifiedIds.has(b.id)) : [];
   const verifiedList = currentTrip ? currentTripBookings.filter(b => verifiedIds.has(b.id)) : [];
   const upcomingTrips = trips.filter(t => t !== currentTrip && (t.status === 'scheduled' || t.status === 'assigned'));

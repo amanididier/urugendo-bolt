@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -14,7 +14,6 @@ import {
   ChevronRight,
   Search,
   CheckCircle,
-  XCircle,
   Bus,
   Save,
   Phone,
@@ -29,7 +28,22 @@ import {
   updateBookingStatus,
   updateTripStatus,
 } from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 import type { Trip, Booking } from "@/lib/types";
+
+export interface ExtendedBooking extends Omit<Partial<Booking>, "status"> {
+  id: string;
+  passengerName?: string;
+  passengerPhone?: string;
+  seatNumber?: string;
+  totalAmount?: number;
+  status?: string;
+  trip?: any;
+  momoName?: string;
+  momoNumber?: string;
+  shortCode?: string;
+  createdAt?: string;
+}
 
 interface PendingMoMoPayment {
   id: string;
@@ -61,7 +75,7 @@ interface ManifestBus {
 export default function AgencyDashboard() {
   const router = useRouter();
   const [trips, setTrips] = useState<Trip[]>([]);
-  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [bookings, setBookings] = useState<ExtendedBooking[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<
     "today" | "schedule" | "verify" | "manifest"
@@ -73,11 +87,14 @@ export default function AgencyDashboard() {
   const [searchSeat, setSearchSeat] = useState("");
   const [verifyResult, setVerifyResult] = useState<{
     found: boolean;
-    booking?: Booking;
+    booking?: ExtendedBooking;
   } | null>(null);
   const [verifying, setVerifying] = useState(false);
 
-  // Manifest empty seats state tracking
+  // Agency Session Context
+  const [agentBranch, setAgentBranch] = useState("Musanze");
+  const [operatorId, setOperatorId] = useState("");
+
   const [emptySeatsInputs, setEmptySeatsInputs] = useState<
     Record<string, number>
   >({});
@@ -85,45 +102,56 @@ export default function AgencyDashboard() {
     {},
   );
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const todayStr = new Date().toISOString().split("T")[0];
-      const [todayTrips, allBookings] = await Promise.all([
-        fetchTripsByDate(todayStr),
-        fetchAllBookings(),
-      ]);
-      setTrips(todayTrips || []);
-      setBookings(allBookings || []);
-    } catch (error) {
-      console.error("Failed to fetch agency dashboard data:", error);
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    let isMounted = true;
+
+    // Load logged-in station details
+    const branch = localStorage.getItem("urugendo_branch") || "Musanze";
+    const opId = localStorage.getItem("urugendo_operator_id") || "";
+    setAgentBranch(branch);
+    setOperatorId(opId);
+
+    async function loadDashboardData() {
+      setLoading(true);
+      try {
+        const todayStr = new Date().toISOString().split("T")[0];
+        const [todayTrips, allBookings] = await Promise.all([
+          fetchTripsByDate(todayStr),
+          fetchAllBookings(),
+        ]);
+        if (isMounted) {
+          setTrips(todayTrips || []);
+          setBookings((allBookings as ExtendedBooking[]) || []);
+        }
+      } catch (error) {
+        console.error("Failed to fetch agency dashboard data:", error);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
     }
+
+    loadDashboardData();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  // Derive pending MoMo transactions from unconfirmed / payment-submitted bookings
   const pendingMoMoPayments: PendingMoMoPayment[] = bookings
     .filter((b) => b.status === "pending" || b.status === "payment_submitted")
     .map((b) => {
-      const tripObj = typeof b.trip === "object" ? b.trip : null;
+      const tripObj = b.trip && typeof b.trip === "object" ? b.trip : null;
+      const createdDate = b.createdAt ? new Date(b.createdAt) : new Date();
+
       return {
         id: b.id,
-        momoName:
-          (b as unknown as { momoName?: string }).momoName || "MTN Subscriber",
-        momoNumber:
-          (b as unknown as { momoNumber?: string }).momoNumber ||
-          b.passengerPhone ||
-          "0780000000",
+        momoName: b.momoName || "MTN Subscriber",
+        momoNumber: b.momoNumber || b.passengerPhone || "0780000000",
         passengerName: b.passengerName || "Passenger",
         tripRoute: tripObj
           ? `${tripObj.from} → ${tripObj.to}`
-          : "Musanze → Kigali",
-        date: new Date(b.createdAt || Date.now()).toLocaleDateString("en-GB", {
+          : `${agentBranch} Route`,
+        date: createdDate.toLocaleDateString("en-GB", {
           day: "2-digit",
           month: "short",
           hour: "2-digit",
@@ -131,13 +159,10 @@ export default function AgencyDashboard() {
         }),
         amount: b.totalAmount || 5000,
         status: "pending",
-        shortCode:
-          (b as unknown as { shortCode?: string }).shortCode ||
-          b.id.substring(0, 6).toUpperCase(),
+        shortCode: b.shortCode || b.id.substring(0, 6).toUpperCase(),
       };
     });
 
-  // Calculate dashboard stats
   const activeBookings = bookings.filter((b) => b.status !== "cancelled");
   const todayRevenue = activeBookings.reduce(
     (sum, b) => sum + (b.totalAmount || 0),
@@ -153,11 +178,11 @@ export default function AgencyDashboard() {
     activeRoutes: new Set(trips.map((t) => `${t.from}-${t.to}`)).size || 5,
   };
 
-  // Mock Manifest buses generated from active schedule & station notifications
+  // Dynamically mapped manifest lists bound to active station
   const manifestBuses: ManifestBus[] = [
     {
       id: "mf-1",
-      trip: "Kigali → Musanze",
+      trip: "Kigali → " + agentBranch,
       departureTime: "14:00",
       arrivalTime: "16:15",
       driverName: "Jean-Paul Habimana",
@@ -167,11 +192,11 @@ export default function AgencyDashboard() {
       emptySeats: emptySeatsInputs["mf-1"] ?? 11,
       type: "incoming",
       originStation: "Kigali Nyabugogo",
-      destinationStation: "Musanze Station",
+      destinationStation: agentBranch + " Station",
     },
     {
       id: "mf-2",
-      trip: "Rubavu → Musanze",
+      trip: "Rubavu → " + agentBranch,
       departureTime: "14:30",
       arrivalTime: "15:45",
       driverName: "Eric Ndayishimiye",
@@ -181,11 +206,11 @@ export default function AgencyDashboard() {
       emptySeats: emptySeatsInputs["mf-2"] ?? 7,
       type: "incoming",
       originStation: "Rubavu Station",
-      destinationStation: "Musanze Station",
+      destinationStation: agentBranch + " Station",
     },
     {
       id: "mf-3",
-      trip: "Musanze → Kigali",
+      trip: agentBranch + " → Kigali",
       departureTime: "12:30",
       arrivalTime: "14:45",
       driverName: "Emmanuel Bizimana",
@@ -194,12 +219,12 @@ export default function AgencyDashboard() {
       totalCapacity: 29,
       emptySeats: emptySeatsInputs["mf-3"] ?? 4,
       type: "outgoing",
-      originStation: "Musanze Station",
+      originStation: agentBranch + " Station",
       destinationStation: "Kigali Nyabugogo",
     },
     {
       id: "mf-4",
-      trip: "Musanze → Rubavu",
+      trip: agentBranch + " → Rubavu",
       departureTime: "13:00",
       arrivalTime: "14:15",
       driverName: "Claude Mugisha",
@@ -208,7 +233,7 @@ export default function AgencyDashboard() {
       totalCapacity: 29,
       emptySeats: emptySeatsInputs["mf-4"] ?? 9,
       type: "outgoing",
-      originStation: "Musanze Station",
+      originStation: agentBranch + " Station",
       destinationStation: "Rubavu Station",
     },
   ];
@@ -219,21 +244,21 @@ export default function AgencyDashboard() {
       return;
     }
     const query = searchSeat.toUpperCase().trim();
-    const found = bookings.find(
-      (b) =>
+    const found = bookings.find((b) => {
+      return (
         b.seatNumber?.toUpperCase() === query ||
         b.id.toUpperCase().includes(query) ||
-        b.passengerName.toUpperCase().includes(query) ||
-        (b as unknown as { shortCode?: string }).shortCode?.toUpperCase() ===
-          query,
-    );
+        b.passengerName?.toUpperCase().includes(query) ||
+        b.shortCode?.toUpperCase() === query
+      );
+    });
 
     setVerifyResult({ found: !!found, booking: found });
   };
 
   const handleConfirmMoMoPayment = async (bookingId: string) => {
     setVerifying(true);
-    const success = await updateBookingStatus(bookingId, "confirmed");
+    const success = await updateBookingStatus(bookingId, "confirmed" as any);
     if (success) {
       setBookings((prev) =>
         prev.map((b) =>
@@ -246,7 +271,7 @@ export default function AgencyDashboard() {
 
   const handleMarkAsBoardedUsed = async (bookingId: string) => {
     setVerifying(true);
-    const success = await updateBookingStatus(bookingId, "boarded");
+    const success = await updateBookingStatus(bookingId, "boarded" as any);
     if (success) {
       setBookings((prev) =>
         prev.map((b) => (b.id === bookingId ? { ...b, status: "boarded" } : b)),
@@ -263,10 +288,12 @@ export default function AgencyDashboard() {
   };
 
   const handleMarkDelayed = async (tripId: string) => {
-    const success = await updateTripStatus(tripId, "delayed");
+    const success = await updateTripStatus(tripId, "delayed" as any);
     if (success) {
       setTrips((prev) =>
-        prev.map((t) => (t.id === tripId ? { ...t, status: "delayed" } : t)),
+        prev.map((t) =>
+          t.id === tripId ? { ...t, status: "delayed" as Trip["status"] } : t,
+        ),
       );
     }
   };
@@ -298,7 +325,6 @@ export default function AgencyDashboard() {
 
   return (
     <div className="bg-surface-secondary pb-[88px] min-h-screen">
-      {/* Agency Header */}
       <div className="bg-primary pt-[60px] px-5 pb-5 rounded-b-[28px]">
         <div className="flex items-center gap-3 mb-3">
           <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-2xl">
@@ -309,12 +335,11 @@ export default function AgencyDashboard() {
               Agency Dashboard
             </h1>
             <p className="text-[12px] text-white/80 font-medium">
-              Virunga Express • Musanze Station
+              Virunga Express • {agentBranch} Station
             </p>
           </div>
         </div>
 
-        {/* Agency Quick Stats Bar */}
         <div className="grid grid-cols-4 gap-2 mt-4">
           <div className="bg-white/10 rounded-xl p-2 text-center">
             <div className="text-[16px] font-bold text-white">
@@ -343,7 +368,6 @@ export default function AgencyDashboard() {
         </div>
       </div>
 
-      {/* Navigation Tabs */}
       <div className="px-4 -mt-3">
         <div className="bg-white rounded-xl p-1 border border-border flex shadow-sm">
           {(["today", "schedule", "verify", "manifest"] as const).map((tab) => (
@@ -368,10 +392,8 @@ export default function AgencyDashboard() {
         </div>
       </div>
 
-      {/* TODAY TAB */}
       {activeTab === "today" && (
         <div className="px-4 mt-4 space-y-4">
-          {/* Revenue Card */}
           <div className="bg-gradient-to-r from-emerald-600 to-primary rounded-2xl p-4 text-white shadow-sm">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[12px] text-white/80 font-medium">
@@ -388,7 +410,6 @@ export default function AgencyDashboard() {
             </div>
           </div>
 
-          {/* Booking Type Breakdown */}
           <div className="grid grid-cols-2 gap-2">
             <div className="bg-white rounded-xl p-3 border border-border shadow-sm">
               <div className="flex items-center gap-2 mb-1">
@@ -421,7 +442,6 @@ export default function AgencyDashboard() {
             </div>
           </div>
 
-          {/* Quick Nav Actions */}
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => setActiveTab("schedule")}
@@ -445,7 +465,6 @@ export default function AgencyDashboard() {
         </div>
       )}
 
-      {/* SCHEDULE TAB */}
       {activeTab === "schedule" && (
         <div className="px-4 mt-4">
           <button
@@ -569,10 +588,8 @@ export default function AgencyDashboard() {
         </div>
       )}
 
-      {/* VERIFY TAB (INSTANT MOMO RECEIPTS & SINGLE CLICK VERIFICATION) */}
       {activeTab === "verify" && (
         <div className="px-4 mt-4 space-y-4">
-          {/* Quick Search */}
           <div className="bg-white rounded-xl border border-border p-3.5 shadow-sm">
             <h3 className="text-[13px] font-bold text-text-primary mb-2">
               Lookup Ticket or Seat
@@ -626,11 +643,7 @@ export default function AgencyDashboard() {
                               : "bg-amber-100 text-amber-800"
                           }`}
                         >
-                          {(
-                            verifyResult.booking as unknown as {
-                              shortCode?: string;
-                            }
-                          ).shortCode ||
+                          {verifyResult.booking.shortCode ||
                             verifyResult.booking.id
                               .substring(0, 6)
                               .toUpperCase()}
@@ -667,7 +680,6 @@ export default function AgencyDashboard() {
             )}
           </div>
 
-          {/* Pending MoMo Verification Cards */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-[14px] font-extrabold text-text-primary flex items-center gap-1.5">
@@ -753,7 +765,6 @@ export default function AgencyDashboard() {
             )}
           </div>
 
-          {/* All Bookings / Expiration Graying List */}
           <div className="bg-white rounded-xl border border-border p-4 shadow-sm">
             <h3 className="text-[13px] font-bold text-text-primary mb-3">
               Today&apos;s Verified & Boarded Tickets ({bookings.length})
@@ -767,8 +778,7 @@ export default function AgencyDashboard() {
                 {bookings.map((b) => {
                   const isBoardedUsed = b.status === "boarded";
                   const code =
-                    (b as unknown as { shortCode?: string }).shortCode ||
-                    b.id.substring(0, 6).toUpperCase();
+                    b.shortCode || b.id.substring(0, 6).toUpperCase();
 
                   return (
                     <div
@@ -836,10 +846,8 @@ export default function AgencyDashboard() {
         </div>
       )}
 
-      {/* MANIFEST TAB (INCOMING & OUTGOING BUSES TRACKING) */}
       {activeTab === "manifest" && (
         <div className="px-4 mt-4 space-y-4">
-          {/* Incoming vs Outgoing Sub-tabs */}
           <div className="bg-gray-200/80 p-1 rounded-xl flex">
             <button
               onClick={() => setManifestSubTab("incoming")}
@@ -865,7 +873,6 @@ export default function AgencyDashboard() {
             </button>
           </div>
 
-          {/* Incoming Buses List */}
           {manifestSubTab === "incoming" && (
             <div className="space-y-3">
               {manifestBuses
@@ -922,7 +929,6 @@ export default function AgencyDashboard() {
             </div>
           )}
 
-          {/* Outgoing Buses List with Empty Seats Input */}
           {manifestSubTab === "outgoing" && (
             <div className="space-y-3">
               {manifestBuses
@@ -963,7 +969,6 @@ export default function AgencyDashboard() {
                       </div>
                     </div>
 
-                    {/* Empty Seats Input Field & Save Button */}
                     <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
                       <div className="flex-1 flex items-center gap-2">
                         <label className="text-[11px] text-text-muted font-medium shrink-0">
@@ -996,7 +1001,6 @@ export default function AgencyDashboard() {
             </div>
           )}
 
-          {/* Go to full report link */}
           <button
             onClick={() => router.push("/agency/reports")}
             className="w-full bg-white border border-border rounded-xl py-3 flex items-center justify-center gap-2 shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all mt-4"

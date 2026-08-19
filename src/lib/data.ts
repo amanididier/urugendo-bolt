@@ -80,7 +80,6 @@ export const BUS_COLORS = [
   "#F97316",
 ];
 
-// Cleaned up to avoid rendering unverified mock agencies
 export const operators: Operator[] = [];
 
 export const popularRoutes: Route[] = [

@@ -35,7 +35,7 @@ export default function PaymentPage() {
   const [phone, setPhone] = useState("");
   const [state, setState] = useState<PayState>("idle");
   const [error, setError] = useState("");
-  const [referenceId, setReferenceId] = useState("");
+  const [, setReferenceId] = useState("");
 
   if (!selectedTrip || !selectedSeat) {
     return (
@@ -56,6 +56,17 @@ export default function PaymentPage() {
 
   const bookingFee = Math.round(selectedTrip.price * 0.025);
   const total = selectedTrip.price + bookingFee;
+
+  const operatorObj =
+    typeof selectedTrip.operator === "object" && selectedTrip.operator !== null
+      ? selectedTrip.operator
+      : null;
+  const operatorEmoji = operatorObj?.emoji || "🚌";
+  const operatorName =
+    operatorObj?.name ||
+    (typeof selectedTrip.operator === "string"
+      ? selectedTrip.operator
+      : "Bus Operator");
 
   const functionUrl = `${
     process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL
@@ -226,7 +237,7 @@ export default function PaymentPage() {
               {t("operator", language)}
             </span>
             <span className="text-[14px] font-semibold text-text-primary">
-              {selectedTrip.operator.emoji} {selectedTrip.operator.name}
+              {operatorEmoji} {operatorName}
             </span>
           </div>
           <div className="border-t border-border" />

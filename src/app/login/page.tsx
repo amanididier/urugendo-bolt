@@ -11,7 +11,9 @@ import {
   ArrowRight,
   Shield,
   Building2,
+  MapPin,
   Check,
+  ChevronDown,
 } from "lucide-react";
 import { useApp } from "@/context/app-context";
 import { supabase } from "@/lib/supabase";
@@ -19,7 +21,16 @@ import { supabase } from "@/lib/supabase";
 interface OperatorOption {
   id: string;
   name: string;
+  branches?: string[];
 }
+
+const DEFAULT_VIRUNGA_BRANCHES = [
+  "Musanze",
+  "Kigali",
+  "Rubavu",
+  "Nyagatare",
+  "Gicumbi",
+];
 
 export default function LoginPage() {
   return (
@@ -47,20 +58,18 @@ function LoginContent() {
   const [operatorDropdownOpen, setOperatorDropdownOpen] = useState(false);
   const operatorFieldRef = useRef<HTMLDivElement>(null);
 
-  const isAgency = searchParams.get("role") === "agency";
+  // --- Branch dropdown state ---
+  const [selectedBranch, setSelectedBranch] = useState<string>("");
+  const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
+  const branchFieldRef = useRef<HTMLDivElement>(null);
 
-  // Load operators from the database — currently just Virunga Express.
-  // Adding a new operator later needs zero changes here: it will simply
-  // appear in this list once its row exists in the operators table.
+  // Load operators from database
   useEffect(() => {
     async function loadOperators() {
       const { data, error: opError } = await supabase
         .from("operators")
-        .select("id, name")
+        .select("id, name, branches")
         .order("name", { ascending: true });
-
-      // Temporary connection test log:
-      console.log("Supabase operators fetch result:", { data, opError });
 
       if (opError) {
         console.error("[login] failed to load operators:", opError);
@@ -85,13 +94,23 @@ function LoginContent() {
     setSelectedOperator(op);
     setOperatorQuery(op.name);
     setOperatorDropdownOpen(false);
+    setSelectedBranch(""); // Reset selected branch when operator changes
   };
 
   const handleOperatorChange = (value: string) => {
     setOperatorQuery(value);
     setSelectedOperator(null);
+    setSelectedBranch("");
     setOperatorDropdownOpen(true);
   };
+
+  // Determine available branches for the selected agency
+  const availableBranches =
+    selectedOperator?.branches && selectedOperator.branches.length > 0
+      ? selectedOperator.branches
+      : selectedOperator?.name.toLowerCase().includes("virunga")
+        ? DEFAULT_VIRUNGA_BRANCHES
+        : [];
 
   const handleLogin = async () => {
     setError("");
@@ -103,6 +122,11 @@ function LoginContent() {
       setError("Please select your bus operator");
       return;
     }
+    if (availableBranches.length > 0 && !selectedBranch) {
+      setError("Please select your agency branch");
+      return;
+    }
+
     setLoading(true);
 
     const { data: authData, error: authError } =
@@ -120,30 +144,32 @@ function LoginContent() {
       return;
     }
 
-    // Link this agent's profile to the selected operator.
+    // Link agent's profile to selected operator and branch
     const { error: profileError } = await supabase
       .from("profiles")
-      .update({ operator_id: selectedOperator.id })
+      .update({
+        operator_id: selectedOperator.id,
+        branch: selectedBranch || null,
+      })
       .eq("id", authData.user.id);
 
     setLoading(false);
 
     if (profileError) {
-      console.error("[login] failed to link operator to profile:", {
-        message: profileError.message,
-        details: profileError.details,
-        hint: profileError.hint,
-        code: profileError.code,
-      });
+      console.error("[login] failed to link profile:", profileError);
       setError(
-        "Signed in, but could not link your operator account. Please contact support.",
+        "Signed in, but could not update profile branch details. Please contact support.",
       );
       return;
     }
 
     if (typeof window !== "undefined") {
       localStorage.setItem("urugendo_role", "agent");
+      if (selectedBranch) {
+        localStorage.setItem("urugendo_branch", selectedBranch);
+      }
     }
+
     setUserRole("agent");
     router.push("/agency");
   };
@@ -170,8 +196,8 @@ function LoginContent() {
       {/* Login Form */}
       <div className="px-5 mt-6">
         <div className="space-y-4">
-          {/* Operator dropdown */}
-          <div ref={operatorFieldRef}>
+          {/* Operator Dropdown Field */}
+          <div ref={operatorFieldRef} className="relative">
             <label className="text-[13px] font-semibold text-text-primary block mb-2">
               Bus Operator
             </label>
@@ -189,7 +215,7 @@ function LoginContent() {
                   setTimeout(() => setOperatorDropdownOpen(false), 150)
                 }
                 placeholder="Start typing your operator..."
-                className="w-full h-12 pl-10 pr-10 rounded-xl border border-border bg-white text-[15px] focus:outline-none focus:border-primary"
+                className="w-full h-12 pl-10 pr-10 rounded-xl border border-border bg-white text-[15px] focus:outline-none focus:border-primary transition-all font-medium"
               />
               {selectedOperator && (
                 <Check
@@ -197,33 +223,108 @@ function LoginContent() {
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-primary"
                 />
               )}
-
               {operatorDropdownOpen && filteredOperators.length > 0 && (
-                <div className="absolute z-20 mt-1 w-full bg-white border border-border rounded-xl shadow-lg overflow-hidden">
+                <div className="absolute z-30 mt-1.5 w-full bg-white border border-border rounded-2xl shadow-xl overflow-hidden divide-y divide-border/50">
                   {filteredOperators.map((op) => (
                     <button
                       key={op.id}
                       type="button"
                       onMouseDown={() => handleOperatorSelect(op)}
-                      className="w-full text-left px-4 py-3 text-[15px] hover:bg-primary/5 flex items-center gap-2 transition-colors"
+                      className="w-full text-left px-4 py-3 text-[14px] hover:bg-primary/5 flex items-center justify-between transition-colors font-medium text-text-primary"
                     >
-                      <Building2 size={16} className="text-text-muted" />
-                      {op.name}
+                      <span className="flex items-center gap-2.5">
+                        <Building2 size={16} className="text-text-muted" />
+                        {op.name}
+                      </span>
+                      {selectedOperator?.id === op.id && (
+                        <Check size={16} className="text-primary" />
+                      )}
                     </button>
                   ))}
                 </div>
               )}
-
-              {operatorDropdownOpen &&
-                operatorQuery &&
-                filteredOperators.length === 0 && (
-                  <div className="absolute z-20 mt-1 w-full bg-white border border-border rounded-xl shadow-lg px-4 py-3 text-[13px] text-text-muted">
-                    No matching operator found
-                  </div>
-                )}
             </div>
           </div>
 
+          {/* Branch Selection Dropdown - Rendered after Agency Selection */}
+          {selectedOperator && availableBranches.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              ref={branchFieldRef}
+              className="relative"
+            >
+              <label className="text-[13px] font-semibold text-text-primary block mb-2">
+                Station / Agency Branch
+              </label>
+              <div className="relative">
+                <MapPin
+                  size={18}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-primary z-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setBranchDropdownOpen(!branchDropdownOpen)}
+                  onBlur={() =>
+                    setTimeout(() => setBranchDropdownOpen(false), 150)
+                  }
+                  className="w-full h-12 pl-10 pr-10 text-left rounded-xl border border-border bg-white text-[15px] font-medium text-text-primary focus:outline-none focus:border-primary flex items-center justify-between"
+                >
+                  <span
+                    className={
+                      selectedBranch ? "text-text-primary" : "text-text-muted"
+                    }
+                  >
+                    {selectedBranch
+                      ? `${selectedBranch} Branch`
+                      : "Select branch station..."}
+                  </span>
+                  <ChevronDown
+                    size={18}
+                    className={`text-text-muted transition-transform duration-200 ${
+                      branchDropdownOpen ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
+                {branchDropdownOpen && (
+                  <div className="absolute z-30 mt-1.5 w-full bg-white border border-border rounded-2xl shadow-xl overflow-hidden divide-y divide-border/50 max-h-56 overflow-y-auto">
+                    {availableBranches.map((branch) => (
+                      <button
+                        key={branch}
+                        type="button"
+                        onMouseDown={() => {
+                          setSelectedBranch(branch);
+                          setBranchDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-4 py-3 text-[14px] flex items-center justify-between transition-colors font-medium ${
+                          selectedBranch === branch
+                            ? "bg-primary/10 text-primary font-bold"
+                            : "hover:bg-primary/5 text-text-primary"
+                        }`}
+                      >
+                        <span className="flex items-center gap-2.5">
+                          <MapPin
+                            size={15}
+                            className={
+                              selectedBranch === branch
+                                ? "text-primary"
+                                : "text-text-muted"
+                            }
+                          />
+                          {branch} Station
+                        </span>
+                        {selectedBranch === branch && (
+                          <Check size={16} className="text-primary" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+
+          {/* Email Input */}
           <div>
             <label className="text-[13px] font-semibold text-text-primary block mb-2">
               Email Address
@@ -238,10 +339,12 @@ function LoginContent() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="agency@virunga.rw"
-                className="w-full h-12 pl-10 pr-4 rounded-xl border border-border bg-white text-[15px] focus:outline-none focus:border-primary"
+                className="w-full h-12 pl-10 pr-4 rounded-xl border border-border bg-white text-[15px] focus:outline-none focus:border-primary font-medium"
               />
             </div>
           </div>
+
+          {/* Password Input */}
           <div>
             <label className="text-[13px] font-semibold text-text-primary block mb-2">
               Password
@@ -256,9 +359,10 @@ function LoginContent() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full h-12 pl-10 pr-10 rounded-xl border border-border bg-white text-[15px] focus:outline-none focus:border-primary"
+                className="w-full h-12 pl-10 pr-10 rounded-xl border border-border bg-white text-[15px] focus:outline-none focus:border-primary font-medium"
               />
               <button
+                type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted"
               >
@@ -268,16 +372,28 @@ function LoginContent() {
           </div>
 
           {error && (
-            <p className="text-[13px] text-red-500 text-center">{error}</p>
+            <p className="text-[13px] text-red-500 text-center font-medium">
+              {error}
+            </p>
           )}
 
           <button
             onClick={handleLogin}
-            disabled={!email || !password || !selectedOperator || loading}
-            className={`w-full h-12 rounded-full font-bold text-[15px] flex items-center justify-center gap-2 transition-all ${
-              email && password && selectedOperator && !loading
-                ? "bg-primary text-white"
-                : "bg-gray-100 text-gray-400"
+            disabled={
+              !email ||
+              !password ||
+              !selectedOperator ||
+              (availableBranches.length > 0 && !selectedBranch) ||
+              loading
+            }
+            className={`w-full h-12 rounded-full font-bold text-[15px] flex items-center justify-center gap-2 transition-all shadow-md ${
+              email &&
+              password &&
+              selectedOperator &&
+              (!availableBranches.length || selectedBranch) &&
+              !loading
+                ? "bg-primary text-white shadow-primary/20 active:scale-[0.98]"
+                : "bg-gray-100 text-gray-400 cursor-not-allowed shadow-none"
             }`}
           >
             {loading ? "Signing in..." : "Sign In"}
@@ -290,7 +406,7 @@ function LoginContent() {
       <div className="px-5 mt-6 text-center">
         <button
           onClick={() => router.push("/splash")}
-          className="text-[13px] text-text-muted font-semibold"
+          className="text-[13px] text-text-muted font-semibold hover:text-text-primary transition-colors"
         >
           Back to home
         </button>
