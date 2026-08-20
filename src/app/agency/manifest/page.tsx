@@ -14,6 +14,7 @@ import {
   Clock,
   Ticket,
   Armchair,
+  FileSpreadsheet,
 } from "lucide-react";
 import type { AgencyBranch } from "@/lib/types";
 
@@ -32,22 +33,22 @@ interface ManifestTrip {
 const INITIAL_INCOMING: ManifestTrip[] = [
   {
     id: "inc-1",
-    busPlate: "RAD 100B",
-    driverName: "Habimana Eric",
-    from: "Kigali",
+    busPlate: "RAD 450B",
+    driverName: "Jean-Paul Habimana",
+    from: "Kigali Nyabugogo",
     to: "Musanze",
-    time: "14:30",
+    time: "16:15",
     capacity: 29,
     urugendoPassengers: 18,
     status: "In Transit",
   },
   {
     id: "inc-2",
-    busPlate: "RAE 204A",
-    driverName: "Ndayisaba Jean",
-    from: "Rubavu",
+    busPlate: "RAC 112D",
+    driverName: "Eric Ndayishimiye",
+    from: "Rubavu Station",
     to: "Musanze",
-    time: "16:00",
+    time: "15:45",
     capacity: 29,
     urugendoPassengers: 22,
     status: "In Transit",
@@ -79,7 +80,7 @@ const INITIAL_OUTGOING: ManifestTrip[] = [
   },
 ];
 
-const BRANCHES: AgencyBranch[] = [
+const BRANCHES: string[] = [
   "Musanze",
   "Kigali",
   "Rubavu",
@@ -87,15 +88,15 @@ const BRANCHES: AgencyBranch[] = [
   "Gicumbi",
 ];
 
-const getBranchName = (branch: AgencyBranch): string =>
-  typeof branch === "string" ? branch : branch.name;
+const getBranchName = (branch: AgencyBranch | string): string =>
+  typeof branch === "string" ? branch : branch?.name || "Musanze";
 
 export default function AgencyManifestPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<"incoming" | "outgoing">(
     "incoming",
   );
-  const [stationBranch, setStationBranch] = useState<AgencyBranch>("Musanze");
+  const [stationBranch, setStationBranch] = useState<string>("Musanze");
   const [emptySeats, setEmptySeats] = useState<Record<string, number>>({
     "out-1": 3,
     "out-2": 1,
@@ -119,6 +120,137 @@ export default function AgencyManifestPage() {
     setTimeout(() => setSavedFeedback(null), 2500);
   };
 
+  const exportStyledExcelReport = () => {
+    const branchName = getBranchName(stationBranch);
+    const isIncoming = activeTab === "incoming";
+
+    const tableHeaders = isIncoming
+      ? [
+          "State",
+          "Bus Plate",
+          "Driver Name",
+          "From",
+          "Destination",
+          "ETA",
+          "Capacity",
+          "Urugendo App Pass",
+          "Paper Tickets",
+          "Status",
+        ]
+      : [
+          "State",
+          "Bus Plate",
+          "Driver Name",
+          "From",
+          "To",
+          "Departure Time",
+          "Capacity",
+          "Urugendo App Pass",
+          "Empty Seats",
+          "Paper Tickets",
+          "Total Onboard",
+          "Status",
+        ];
+
+    const tableRows = isIncoming
+      ? INITIAL_INCOMING.map((trip) => {
+          const paperTickets = Math.max(
+            0,
+            trip.capacity - trip.urugendoPassengers,
+          );
+          return `
+            <tr>
+              <td style="padding: 8px; text-align: center;"><span style="background-color: #DCFCE7; color: #15803D; padding: 4px 10px; border-radius: 12px; font-weight: bold; font-size: 11px; display: inline-block;">INCOMING</span></td>
+              <td style="padding: 8px; font-weight: bold;">${trip.busPlate}</td>
+              <td style="padding: 8px;">${trip.driverName}</td>
+              <td style="padding: 8px;">${trip.from}</td>
+              <td style="padding: 8px;">${branchName}</td>
+              <td style="padding: 8px; font-weight: bold; color: #047857;">${trip.time}</td>
+              <td style="padding: 8px; text-align: center;">${trip.capacity}</td>
+              <td style="padding: 8px; text-align: center; font-weight: bold; color: #00B14F;">${trip.urugendoPassengers}</td>
+              <td style="padding: 8px; text-align: center;">${paperTickets}</td>
+              <td style="padding: 8px; text-align: center;">${trip.status}</td>
+            </tr>`;
+        }).join("")
+      : INITIAL_OUTGOING.map((trip) => {
+          const empty = emptySeats[trip.id] ?? 0;
+          const paperTickets = Math.max(
+            0,
+            trip.capacity - trip.urugendoPassengers - empty,
+          );
+          const totalOnboard = trip.urugendoPassengers + paperTickets;
+          return `
+            <tr>
+              <td style="padding: 8px; text-align: center;"><span style="background-color: #FEE2E2; color: #B91C1C; padding: 4px 10px; border-radius: 12px; font-weight: bold; font-size: 11px; display: inline-block;">OUTGOING</span></td>
+              <td style="padding: 8px; font-weight: bold;">${trip.busPlate}</td>
+              <td style="padding: 8px;">${trip.driverName}</td>
+              <td style="padding: 8px;">${branchName}</td>
+              <td style="padding: 8px;">${trip.to}</td>
+              <td style="padding: 8px; font-weight: bold; color: #1E293B;">${trip.time}</td>
+              <td style="padding: 8px; text-align: center;">${trip.capacity}</td>
+              <td style="padding: 8px; text-align: center; font-weight: bold; color: #00B14F;">${trip.urugendoPassengers}</td>
+              <td style="padding: 8px; text-align: center; color: #D97706; font-weight: bold;">${empty}</td>
+              <td style="padding: 8px; text-align: center;">${paperTickets}</td>
+              <td style="padding: 8px; text-align: center; font-weight: bold;">${totalOnboard}/${trip.capacity}</td>
+              <td style="padding: 8px; text-align: center;">${trip.status}</td>
+            </tr>`;
+        }).join("");
+
+    const htmlContent = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta charset="utf-8" />
+        <!--[if gte mso 9]>
+        <xml>
+          <x:ExcelWorkbook>
+            <x:ExcelWorksheets>
+              <x:ExcelWorksheet>
+                <x:Name>Manifest Report</x:Name>
+                <x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
+              </x:ExcelWorksheet>
+            </x:ExcelWorksheets>
+          </x:ExcelWorkbook>
+        </xml>
+        <![endif]-->
+      </head>
+      <body style="font-family: Arial, sans-serif; font-size: 12px;">
+        <h2 style="color: #0F172A; margin-bottom: 4px;">Station Manifest Report (${branchName} Branch)</h2>
+        <p style="color: #64748B; font-size: 11px; margin-top: 0;">Mode: <b>${activeTab.toUpperCase()}</b> | Generated: ${new Date().toLocaleString()}</p>
+        <table border="1" cellpadding="0" cellspacing="0" style="border-collapse: collapse; border: 1px solid #E2E8F0; width: 100%;">
+          <thead>
+            <tr style="background-color: #0F172A; color: #FFFFFF; font-weight: bold; text-align: left;">
+              ${tableHeaders
+                .map(
+                  (header) =>
+                    `<th style="padding: 10px; border: 1px solid #334155;">${header}</th>`,
+                )
+                .join("")}
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+      </body>
+      </html>`;
+
+    const blob = new Blob([htmlContent], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute(
+      "download",
+      `manifest-${activeTab}-${branchName.toLowerCase()}-${new Date()
+        .toISOString()
+        .slice(0, 10)}.xls`,
+    );
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 pb-20 font-sans">
       {/* Header Banner */}
@@ -126,7 +258,7 @@ export default function AgencyManifestPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.back()}
-            className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors"
+            className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors cursor-pointer"
           >
             <ArrowLeft size={18} />
           </button>
@@ -141,14 +273,11 @@ export default function AgencyManifestPage() {
                 onChange={(e) => handleBranchChange(e.target.value)}
                 className="bg-slate-800 text-white text-xs font-bold rounded px-2 py-0.5 border border-slate-700 focus:outline-hidden"
               >
-                {BRANCHES.map((b) => {
-                  const name = getBranchName(b);
-                  return (
-                    <option key={name} value={name}>
-                      Branch: {name}
-                    </option>
-                  );
-                })}
+                {BRANCHES.map((b) => (
+                  <option key={b} value={b}>
+                    Branch: {b}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
@@ -162,7 +291,7 @@ export default function AgencyManifestPage() {
       <div className="bg-white p-2 border-b border-slate-200 flex gap-2 max-w-2xl mx-auto sticky top-0 z-10 shadow-xs">
         <button
           onClick={() => setActiveTab("incoming")}
-          className={`flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors ${
+          className={`flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer ${
             activeTab === "incoming"
               ? "bg-[#00B14F] text-white shadow-xs"
               : "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -173,7 +302,7 @@ export default function AgencyManifestPage() {
 
         <button
           onClick={() => setActiveTab("outgoing")}
-          className={`flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors ${
+          className={`flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer ${
             activeTab === "outgoing"
               ? "bg-slate-900 text-white shadow-xs"
               : "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -275,7 +404,6 @@ export default function AgencyManifestPage() {
                     </span>
                   </div>
 
-                  {/* Breakdown Stats */}
                   <div className="grid grid-cols-3 gap-2 py-2 border-y border-slate-100 text-center">
                     <div>
                       <span className="text-[9.5px] font-bold text-slate-400 block uppercase">
@@ -304,7 +432,6 @@ export default function AgencyManifestPage() {
                     </div>
                   </div>
 
-                  {/* Empty Seats Input Tracker */}
                   <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-200">
                     <div>
                       <span className="text-xs font-bold text-slate-700 block">
@@ -330,7 +457,7 @@ export default function AgencyManifestPage() {
                       />
                       <button
                         onClick={() => handleSaveEmptySeats(trip.id)}
-                        className="bg-[#00B14F] hover:bg-[#00B14F]/90 text-white p-2 rounded-lg text-xs font-bold flex items-center justify-center transition-colors"
+                        className="bg-[#00B14F] hover:bg-[#00B14F]/90 text-white p-2 rounded-lg text-xs font-bold flex items-center justify-center transition-colors cursor-pointer"
                         title="Save empty seats"
                       >
                         {savedFeedback === trip.id ? (
@@ -349,6 +476,15 @@ export default function AgencyManifestPage() {
                 </div>
               );
             })}
+
+        {/* Styled Printable Excel Manifest Action Button */}
+        <button
+          onClick={exportStyledExcelReport}
+          className="w-full mt-4 bg-[#00B14F] hover:bg-[#00B14F]/90 text-white font-bold py-3.5 px-4 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-wide cursor-pointer"
+        >
+          <FileSpreadsheet size={16} /> Generate Printable Manifest ({activeTab}
+          )
+        </button>
       </div>
     </div>
   );

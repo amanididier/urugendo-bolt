@@ -10,8 +10,6 @@ import {
   MapPin,
   TrendingUp,
   DollarSign,
-  Calendar,
-  ChevronRight,
   Search,
   CheckCircle,
   Bus,
@@ -21,6 +19,10 @@ import {
   AlertCircle,
   ArrowUpRight,
   ArrowDownLeft,
+  FileSpreadsheet,
+  CheckCircle2,
+  Armchair,
+  Users,
 } from "lucide-react";
 import {
   fetchTripsByDate,
@@ -28,8 +30,7 @@ import {
   updateBookingStatus,
   updateTripStatus,
 } from "@/lib/api";
-import { supabase } from "@/lib/supabase";
-import type { Trip, Booking } from "@/lib/types";
+import type { Trip, Booking, AgencyBranch } from "@/lib/types";
 
 export interface ExtendedBooking extends Omit<Partial<Booking>, "status"> {
   id: string;
@@ -57,20 +58,70 @@ interface PendingMoMoPayment {
   shortCode: string;
 }
 
-interface ManifestBus {
+interface ManifestTrip {
   id: string;
-  trip: string;
-  departureTime: string;
-  arrivalTime: string;
+  busPlate: string;
   driverName: string;
-  plateNumber: string;
+  from: string;
+  to: string;
+  time: string;
+  capacity: number;
   urugendoPassengers: number;
-  totalCapacity: number;
-  emptySeats: number;
-  type: "incoming" | "outgoing";
-  originStation?: string;
-  destinationStation?: string;
+  status: string;
 }
+
+const INITIAL_INCOMING: ManifestTrip[] = [
+  {
+    id: "inc-1",
+    busPlate: "RAD 450B",
+    driverName: "Jean-Paul Habimana",
+    from: "Kigali Nyabugogo",
+    to: "Musanze",
+    time: "16:15",
+    capacity: 29,
+    urugendoPassengers: 18,
+    status: "In Transit",
+  },
+  {
+    id: "inc-2",
+    busPlate: "RAC 112D",
+    driverName: "Eric Ndayishimiye",
+    from: "Rubavu Station",
+    to: "Musanze",
+    time: "15:45",
+    capacity: 29,
+    urugendoPassengers: 22,
+    status: "In Transit",
+  },
+];
+
+const INITIAL_OUTGOING: ManifestTrip[] = [
+  {
+    id: "out-1",
+    busPlate: "RAC 405C",
+    driverName: "Kamali Patrick",
+    from: "Musanze",
+    to: "Rubavu",
+    time: "10:00 AM",
+    capacity: 29,
+    urugendoPassengers: 16,
+    status: "Departed",
+  },
+  {
+    id: "out-2",
+    busPlate: "RAD 882D",
+    driverName: "Mugisha Francois",
+    from: "Musanze",
+    to: "Kigali",
+    time: "11:30 AM",
+    capacity: 29,
+    urugendoPassengers: 21,
+    status: "Departed",
+  },
+];
+
+const getBranchName = (branch: AgencyBranch | string): string =>
+  typeof branch === "string" ? branch : branch?.name || "Musanze";
 
 export default function AgencyDashboard() {
   const router = useRouter();
@@ -93,14 +144,13 @@ export default function AgencyDashboard() {
 
   // Agency Session Context
   const [agentBranch, setAgentBranch] = useState("Musanze");
-  const [operatorId, setOperatorId] = useState("");
+  const [, setOperatorId] = useState("");
 
-  const [emptySeatsInputs, setEmptySeatsInputs] = useState<
-    Record<string, number>
-  >({});
-  const [savedManifests, setSavedManifests] = useState<Record<string, boolean>>(
-    {},
-  );
+  const [emptySeats, setEmptySeats] = useState<Record<string, number>>({
+    "out-1": 3,
+    "out-2": 1,
+  });
+  const [savedFeedback, setSavedFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -110,6 +160,15 @@ export default function AgencyDashboard() {
     const opId = localStorage.getItem("urugendo_operator_id") || "";
     setAgentBranch(branch);
     setOperatorId(opId);
+
+    const savedEmptySeats = localStorage.getItem("urugendo_empty_seats");
+    if (savedEmptySeats) {
+      try {
+        setEmptySeats(JSON.parse(savedEmptySeats));
+      } catch (e) {
+        console.error("Failed to parse saved empty seats", e);
+      }
+    }
 
     async function loadDashboardData() {
       setLoading(true);
@@ -136,6 +195,144 @@ export default function AgencyDashboard() {
       isMounted = false;
     };
   }, []);
+
+  const handleSaveEmptySeats = (tripId: string) => {
+    localStorage.setItem("urugendo_empty_seats", JSON.stringify(emptySeats));
+    setSavedFeedback(tripId);
+    setTimeout(() => setSavedFeedback(null), 2500);
+  };
+
+  const exportStyledExcelReport = () => {
+    const branchName = getBranchName(agentBranch);
+    const isIncoming = manifestSubTab === "incoming";
+
+    const tableHeaders = isIncoming
+      ? [
+          "State",
+          "Bus Plate",
+          "Driver Name",
+          "From",
+          "Destination",
+          "ETA",
+          "Capacity",
+          "Urugendo App Pass",
+          "Paper Tickets",
+          "Status",
+        ]
+      : [
+          "State",
+          "Bus Plate",
+          "Driver Name",
+          "From",
+          "To",
+          "Departure Time",
+          "Capacity",
+          "Urugendo App Pass",
+          "Empty Seats",
+          "Paper Tickets",
+          "Total Onboard",
+          "Status",
+        ];
+
+    const tableRows = isIncoming
+      ? INITIAL_INCOMING.map((trip) => {
+          const paperTickets = Math.max(
+            0,
+            trip.capacity - trip.urugendoPassengers,
+          );
+          return `
+            <tr>
+              <td style="padding: 8px; text-align: center;"><span style="background-color: #DCFCE7; color: #15803D; padding: 4px 10px; border-radius: 12px; font-weight: bold; font-size: 11px; display: inline-block;">INCOMING</span></td>
+              <td style="padding: 8px; font-weight: bold;">${trip.busPlate}</td>
+              <td style="padding: 8px;">${trip.driverName}</td>
+              <td style="padding: 8px;">${trip.from}</td>
+              <td style="padding: 8px;">${branchName}</td>
+              <td style="padding: 8px; font-weight: bold; color: #047857;">${trip.time}</td>
+              <td style="padding: 8px; text-align: center;">${trip.capacity}</td>
+              <td style="padding: 8px; text-align: center; font-weight: bold; color: #00B14F;">${trip.urugendoPassengers}</td>
+              <td style="padding: 8px; text-align: center;">${paperTickets}</td>
+              <td style="padding: 8px; text-align: center;">${trip.status}</td>
+            </tr>`;
+        }).join("")
+      : INITIAL_OUTGOING.map((trip) => {
+          const empty = emptySeats[trip.id] ?? 0;
+          const paperTickets = Math.max(
+            0,
+            trip.capacity - trip.urugendoPassengers - empty,
+          );
+          const totalOnboard = trip.urugendoPassengers + paperTickets;
+          return `
+            <tr>
+              <td style="padding: 8px; text-align: center;"><span style="background-color: #FEE2E2; color: #B91C1C; padding: 4px 10px; border-radius: 12px; font-weight: bold; font-size: 11px; display: inline-block;">OUTGOING</span></td>
+              <td style="padding: 8px; font-weight: bold;">${trip.busPlate}</td>
+              <td style="padding: 8px;">${trip.driverName}</td>
+              <td style="padding: 8px;">${branchName}</td>
+              <td style="padding: 8px;">${trip.to}</td>
+              <td style="padding: 8px; font-weight: bold; color: #1E293B;">${trip.time}</td>
+              <td style="padding: 8px; text-align: center;">${trip.capacity}</td>
+              <td style="padding: 8px; text-align: center; font-weight: bold; color: #00B14F;">${trip.urugendoPassengers}</td>
+              <td style="padding: 8px; text-align: center; color: #D97706; font-weight: bold;">${empty}</td>
+              <td style="padding: 8px; text-align: center;">${paperTickets}</td>
+              <td style="padding: 8px; text-align: center; font-weight: bold;">${totalOnboard}/${trip.capacity}</td>
+              <td style="padding: 8px; text-align: center;">${trip.status}</td>
+            </tr>`;
+        }).join("");
+
+    const htmlContent = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta charset="utf-8" />
+        <!--[if gte mso 9]>
+        <xml>
+          <x:ExcelWorkbook>
+            <x:ExcelWorksheets>
+              <x:ExcelWorksheet>
+                <x:Name>Manifest Report</x:Name>
+                <x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
+              </x:ExcelWorksheet>
+            </x:ExcelWorksheets>
+          </x:ExcelWorkbook>
+        </xml>
+        <![endif]-->
+      </head>
+      <body style="font-family: Arial, sans-serif; font-size: 12px;">
+        <h2 style="color: #0F172A; margin-bottom: 4px;">Station Manifest Report (${branchName} Branch)</h2>
+        <p style="color: #64748B; font-size: 11px; margin-top: 0;">Mode: <b>${manifestSubTab.toUpperCase()}</b> | Generated: ${new Date().toLocaleString()}</p>
+        <table border="1" cellpadding="0" cellspacing="0" style="border-collapse: collapse; border: 1px solid #E2E8F0; width: 100%;">
+          <thead>
+            <tr style="background-color: #0F172A; color: #FFFFFF; font-weight: bold; text-align: left;">
+              ${tableHeaders
+                .map(
+                  (header) =>
+                    `<th style="padding: 10px; border: 1px solid #334155;">${header}</th>`,
+                )
+                .join("")}
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+      </body>
+      </html>`;
+
+    const blob = new Blob([htmlContent], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute(
+      "download",
+      `manifest-${manifestSubTab}-${branchName.toLowerCase()}-${new Date()
+        .toISOString()
+        .slice(0, 10)}.xls`,
+    );
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   const pendingMoMoPayments: PendingMoMoPayment[] = bookings
     .filter((b) => b.status === "pending" || b.status === "payment_submitted")
@@ -177,66 +374,6 @@ export default function AgencyDashboard() {
       12,
     activeRoutes: new Set(trips.map((t) => `${t.from}-${t.to}`)).size || 5,
   };
-
-  // Dynamically mapped manifest lists bound to active station
-  const manifestBuses: ManifestBus[] = [
-    {
-      id: "mf-1",
-      trip: "Kigali → " + agentBranch,
-      departureTime: "14:00",
-      arrivalTime: "16:15",
-      driverName: "Jean-Paul Habimana",
-      plateNumber: "RAD 450 B",
-      urugendoPassengers: 18,
-      totalCapacity: 29,
-      emptySeats: emptySeatsInputs["mf-1"] ?? 11,
-      type: "incoming",
-      originStation: "Kigali Nyabugogo",
-      destinationStation: agentBranch + " Station",
-    },
-    {
-      id: "mf-2",
-      trip: "Rubavu → " + agentBranch,
-      departureTime: "14:30",
-      arrivalTime: "15:45",
-      driverName: "Eric Ndayishimiye",
-      plateNumber: "RAC 112 D",
-      urugendoPassengers: 22,
-      totalCapacity: 29,
-      emptySeats: emptySeatsInputs["mf-2"] ?? 7,
-      type: "incoming",
-      originStation: "Rubavu Station",
-      destinationStation: agentBranch + " Station",
-    },
-    {
-      id: "mf-3",
-      trip: agentBranch + " → Kigali",
-      departureTime: "12:30",
-      arrivalTime: "14:45",
-      driverName: "Emmanuel Bizimana",
-      plateNumber: "RAE 889 A",
-      urugendoPassengers: 25,
-      totalCapacity: 29,
-      emptySeats: emptySeatsInputs["mf-3"] ?? 4,
-      type: "outgoing",
-      originStation: agentBranch + " Station",
-      destinationStation: "Kigali Nyabugogo",
-    },
-    {
-      id: "mf-4",
-      trip: agentBranch + " → Rubavu",
-      departureTime: "13:00",
-      arrivalTime: "14:15",
-      driverName: "Claude Mugisha",
-      plateNumber: "RAD 302 C",
-      urugendoPassengers: 20,
-      totalCapacity: 29,
-      emptySeats: emptySeatsInputs["mf-4"] ?? 9,
-      type: "outgoing",
-      originStation: agentBranch + " Station",
-      destinationStation: "Rubavu Station",
-    },
-  ];
 
   const handleVerifySearch = () => {
     if (!searchSeat.trim()) {
@@ -280,13 +417,6 @@ export default function AgencyDashboard() {
     setVerifying(false);
   };
 
-  const handleSaveEmptySeats = (busId: string) => {
-    setSavedManifests((prev) => ({ ...prev, [busId]: true }));
-    setTimeout(() => {
-      setSavedManifests((prev) => ({ ...prev, [busId]: false }));
-    }, 2500);
-  };
-
   const handleMarkDelayed = async (tripId: string) => {
     const success = await updateTripStatus(tripId, "delayed" as any);
     if (success) {
@@ -324,8 +454,8 @@ export default function AgencyDashboard() {
   }
 
   return (
-    <div className="bg-surface-secondary pb-[88px] min-h-screen">
-      <div className="bg-primary pt-[60px] px-5 pb-5 rounded-b-[28px]">
+    <div className="bg-surface-secondary pb-[88px] min-h-screen font-sans">
+      <div className="bg-primary pt-[60px] px-5 pb-5 rounded-b-[28px] print:hidden">
         <div className="flex items-center gap-3 mb-3">
           <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-2xl">
             🚌
@@ -368,13 +498,13 @@ export default function AgencyDashboard() {
         </div>
       </div>
 
-      <div className="px-4 -mt-3">
+      <div className="px-4 -mt-3 print:hidden">
         <div className="bg-white rounded-xl p-1 border border-border flex shadow-sm">
           {(["today", "schedule", "verify", "manifest"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`flex-1 py-2 rounded-lg text-[11px] font-semibold transition-colors ${
+              className={`flex-1 py-2 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
                 activeTab === tab
                   ? "bg-primary text-white"
                   : "text-text-muted hover:text-text-primary"
@@ -445,7 +575,7 @@ export default function AgencyDashboard() {
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => setActiveTab("schedule")}
-              className="bg-white rounded-xl py-3 border border-border flex items-center justify-center gap-2 shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all"
+              className="bg-white rounded-xl py-3 border border-border flex items-center justify-center gap-2 shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all cursor-pointer"
             >
               <Plus size={16} className="text-primary" />
               <span className="text-[12px] font-semibold text-text-primary">
@@ -454,7 +584,7 @@ export default function AgencyDashboard() {
             </button>
             <button
               onClick={() => setActiveTab("verify")}
-              className="bg-white rounded-xl py-3 border border-border flex items-center justify-center gap-2 shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all"
+              className="bg-white rounded-xl py-3 border border-border flex items-center justify-center gap-2 shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all cursor-pointer"
             >
               <Search size={16} className="text-primary" />
               <span className="text-[12px] font-semibold text-text-primary">
@@ -469,7 +599,7 @@ export default function AgencyDashboard() {
         <div className="px-4 mt-4">
           <button
             onClick={() => router.push("/agency/schedule")}
-            className="w-full bg-primary text-white rounded-xl py-3 flex items-center justify-center gap-2 font-bold mb-4 shadow-sm active:scale-[0.98] transition-transform"
+            className="w-full bg-primary text-white rounded-xl py-3 flex items-center justify-center gap-2 font-bold mb-4 shadow-sm active:scale-[0.98] transition-transform cursor-pointer"
           >
             <Plus size={18} />
             Add New Departure
@@ -564,7 +694,7 @@ export default function AgencyDashboard() {
                           {trip.status !== "delayed" && (
                             <button
                               onClick={() => handleMarkDelayed(trip.id)}
-                              className="text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded-md hover:bg-orange-100"
+                              className="text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded-md hover:bg-orange-100 cursor-pointer"
                             >
                               Mark Delayed
                             </button>
@@ -611,7 +741,7 @@ export default function AgencyDashboard() {
               </div>
               <button
                 onClick={handleVerifySearch}
-                className="bg-primary text-white px-4 rounded-xl font-bold text-[12px] shadow-sm active:scale-95 transition-transform"
+                className="bg-primary text-white px-4 rounded-xl font-bold text-[12px] shadow-sm active:scale-95 transition-transform cursor-pointer"
               >
                 Search
               </button>
@@ -665,7 +795,7 @@ export default function AgencyDashboard() {
                           handleMarkAsBoardedUsed(verifyResult.booking!.id)
                         }
                         disabled={verifying}
-                        className="bg-primary text-white text-[11px] font-bold px-3 py-1.5 rounded-full shadow-sm hover:bg-primary-dark"
+                        className="bg-primary text-white text-[11px] font-bold px-3 py-1.5 rounded-full shadow-sm hover:bg-primary-dark cursor-pointer"
                       >
                         Verify & Board
                       </button>
@@ -753,7 +883,7 @@ export default function AgencyDashboard() {
                       <button
                         onClick={() => handleConfirmMoMoPayment(momo.id)}
                         disabled={verifying}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[12px] px-4 py-1.5 rounded-lg shadow-sm flex items-center gap-1 active:scale-95 transition-transform"
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[12px] px-4 py-1.5 rounded-lg shadow-sm flex items-center gap-1 active:scale-95 transition-transform cursor-pointer"
                       >
                         <CheckCircle size={14} />
                         Confirm Payment
@@ -832,7 +962,7 @@ export default function AgencyDashboard() {
                         <button
                           onClick={() => handleMarkAsBoardedUsed(b.id)}
                           disabled={verifying}
-                          className="text-[11px] font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full hover:bg-primary/20"
+                          className="text-[11px] font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full hover:bg-primary/20 cursor-pointer"
                         >
                           Mark Boarded
                         </button>
@@ -847,170 +977,207 @@ export default function AgencyDashboard() {
       )}
 
       {activeTab === "manifest" && (
-        <div className="px-4 mt-4 space-y-4">
-          <div className="bg-gray-200/80 p-1 rounded-xl flex">
+        <div className="px-4 mt-4 space-y-3">
+          {/* Manifest Sub-navigation Tabs */}
+          <div className="bg-slate-200/80 p-1 rounded-xl flex gap-1">
             <button
               onClick={() => setManifestSubTab("incoming")}
-              className={`flex-1 py-2 text-[12px] font-bold rounded-lg flex items-center justify-center gap-1.5 transition-colors ${
+              className={`flex-1 py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer ${
                 manifestSubTab === "incoming"
-                  ? "bg-white text-primary shadow-sm"
-                  : "text-text-muted"
+                  ? "bg-[#00B14F] text-white shadow-sm"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
               }`}
             >
-              <ArrowDownLeft size={14} />
-              Incoming Buses
+              <ArrowDownLeft size={16} /> Incoming Buses ({INITIAL_INCOMING.length})
             </button>
+
             <button
               onClick={() => setManifestSubTab("outgoing")}
-              className={`flex-1 py-2 text-[12px] font-bold rounded-lg flex items-center justify-center gap-1.5 transition-colors ${
+              className={`flex-1 py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer ${
                 manifestSubTab === "outgoing"
-                  ? "bg-white text-primary shadow-sm"
-                  : "text-text-muted"
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
               }`}
             >
-              <ArrowUpRight size={14} />
-              Left / Outgoing
+              <ArrowUpRight size={16} /> Outgoing / Departed ({INITIAL_OUTGOING.length})
             </button>
           </div>
 
-          {manifestSubTab === "incoming" && (
-            <div className="space-y-3">
-              {manifestBuses
-                .filter((b) => b.type === "incoming")
-                .map((bus) => (
-                  <motion.div
-                    key={bus.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="bg-white rounded-xl border border-border p-3.5 shadow-sm"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <Bus size={16} className="text-primary" />
-                        <span className="text-[13px] font-bold text-text-primary">
-                          {bus.trip}
+          {/* Manifest Content */}
+          <div className="space-y-3">
+            {manifestSubTab === "incoming"
+              ? INITIAL_INCOMING.map((trip) => {
+                  const paperTickets = Math.max(
+                    0,
+                    trip.capacity - trip.urugendoPassengers,
+                  );
+                  return (
+                    <div
+                      key={trip.id}
+                      className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="text-[10px] font-black text-[#00B14F] uppercase tracking-wider">
+                            INBOUND FROM {trip.from.toUpperCase()}
+                          </span>
+                          <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
+                            <span>Bus {trip.busPlate}</span>
+                          </h2>
+                          <p className="text-xs text-slate-500 font-semibold">
+                            Driver: {trip.driverName}
+                          </p>
+                        </div>
+                        <span className="bg-emerald-100 text-[#00B14F] text-[11px] font-extrabold px-3 py-1 rounded-full flex items-center gap-1">
+                          <Clock size={12} /> ETA: {trip.time}
                         </span>
                       </div>
-                      <span className="text-[10px] font-bold bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
-                        ETA {bus.arrivalTime}
-                      </span>
-                    </div>
 
-                    <div className="text-[11px] text-text-muted space-y-1 mb-3">
-                      <div>
-                        Origin:{" "}
-                        <span className="font-semibold text-text-primary">
-                          {bus.originStation}
+                      <div className="grid grid-cols-3 gap-2 pt-3 border-t border-slate-100 text-center">
+                        <div className="bg-slate-50 p-2 rounded-xl">
+                          <span className="text-[9.5px] font-bold text-slate-400 block uppercase">
+                            Total Capacity
+                          </span>
+                          <span className="text-xs font-black text-slate-800 flex items-center justify-center gap-1">
+                            <Armchair size={12} className="text-slate-500" />
+                            {trip.capacity} Seats
+                          </span>
+                        </div>
+                        <div className="bg-emerald-50 p-2 rounded-xl">
+                          <span className="text-[9.5px] font-bold text-emerald-600 block uppercase">
+                            Urugendo App
+                          </span>
+                          <span className="text-xs font-black text-[#00B14F] flex items-center justify-center gap-1">
+                            <Ticket size={12} />
+                            {trip.urugendoPassengers} Pass
+                          </span>
+                        </div>
+                        <div className="bg-slate-50 p-2 rounded-xl">
+                          <span className="text-[9.5px] font-bold text-slate-400 block uppercase">
+                            Paper Tickets
+                          </span>
+                          <span className="text-xs font-black text-slate-800 flex items-center justify-center gap-1">
+                            <Users size={12} className="text-slate-400" />
+                            {paperTickets} Pass
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              : INITIAL_OUTGOING.map((trip) => {
+                  const empty = emptySeats[trip.id] ?? 0;
+                  const paperTickets = Math.max(
+                    0,
+                    trip.capacity - trip.urugendoPassengers - empty,
+                  );
+
+                  return (
+                    <div
+                      key={trip.id}
+                      className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                            OUTBOUND TO {trip.to.toUpperCase()}
+                          </span>
+                          <h2 className="text-base font-black text-slate-900">
+                            Bus {trip.busPlate}
+                          </h2>
+                          <p className="text-xs text-slate-500 font-semibold">
+                            Driver: {trip.driverName} · Departed: {trip.time}
+                          </p>
+                        </div>
+                        <span className="bg-slate-100 text-slate-700 text-[10.5px] font-extrabold px-2.5 py-1 rounded-full">
+                          Left Station
                         </span>
                       </div>
-                      <div>
-                        Driver:{" "}
-                        <span className="font-semibold text-text-primary">
-                          {bus.driverName}
-                        </span>{" "}
-                        ({bus.plateNumber})
-                      </div>
-                    </div>
 
-                    <div className="flex items-center justify-between pt-2 border-t border-gray-100 text-[11px]">
-                      <span className="text-text-muted">
-                        Urugendo Passengers:{" "}
-                        <strong className="text-primary">
-                          {bus.urugendoPassengers}
-                        </strong>
-                      </span>
-                      <span className="text-text-muted">
-                        Total Capacity:{" "}
-                        <strong>{bus.totalCapacity} seats</strong>
-                      </span>
-                    </div>
-                  </motion.div>
-                ))}
-            </div>
-          )}
-
-          {manifestSubTab === "outgoing" && (
-            <div className="space-y-3">
-              {manifestBuses
-                .filter((b) => b.type === "outgoing")
-                .map((bus) => (
-                  <motion.div
-                    key={bus.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="bg-white rounded-xl border border-border p-3.5 shadow-sm"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <Bus size={16} className="text-emerald-600" />
-                        <span className="text-[13px] font-bold text-text-primary">
-                          {bus.trip}
-                        </span>
+                      <div className="grid grid-cols-3 gap-2 py-2 border-y border-slate-100 text-center">
+                        <div>
+                          <span className="text-[9.5px] font-bold text-slate-400 block uppercase">
+                            Urugendo App
+                          </span>
+                          <span className="text-xs font-black text-[#00B14F]">
+                            {trip.urugendoPassengers} Passengers
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[9.5px] font-bold text-slate-400 block uppercase">
+                            Paper Tickets
+                          </span>
+                          <span className="text-xs font-black text-slate-800">
+                            {paperTickets} Passengers
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[9.5px] font-bold text-slate-400 block uppercase">
+                            Total Onboard
+                          </span>
+                          <span className="text-xs font-black text-slate-800">
+                            {trip.urugendoPassengers + paperTickets} /{" "}
+                            {trip.capacity}
+                          </span>
+                        </div>
                       </div>
-                      <span className="text-[10px] font-bold bg-green-50 text-green-700 px-2 py-0.5 rounded-full">
-                        Departed {bus.departureTime}
-                      </span>
-                    </div>
 
-                    <div className="text-[11px] text-text-muted space-y-1 mb-3">
-                      <div>
-                        Driver:{" "}
-                        <span className="font-semibold text-text-primary">
-                          {bus.driverName}
-                        </span>{" "}
-                        ({bus.plateNumber})
+                      <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                        <div>
+                          <span className="text-xs font-bold text-slate-700 block">
+                            Record Empty Seats
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            Adjusts paper ticket calculation
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={0}
+                            max={trip.capacity}
+                            value={empty}
+                            onChange={(e) =>
+                              setEmptySeats((prev) => ({
+                                ...prev,
+                                [trip.id]: Math.min(
+                                  trip.capacity,
+                                  Math.max(0, Number(e.target.value)),
+                                ),
+                              }))
+                            }
+                            className="w-16 bg-white border border-slate-300 rounded-lg py-1 px-2 text-center font-bold text-xs text-slate-800 focus:ring-2 focus:ring-[#00B14F] focus:outline-none"
+                          />
+                          <button
+                            onClick={() => handleSaveEmptySeats(trip.id)}
+                            className="bg-[#00B14F] hover:bg-[#00B14F]/90 text-white p-2 rounded-lg text-xs font-bold flex items-center justify-center transition-colors cursor-pointer"
+                            title="Save empty seats"
+                          >
+                            {savedFeedback === trip.id ? (
+                              <CheckCircle2 size={15} className="text-white" />
+                            ) : (
+                              <Save size={15} />
+                            )}
+                          </button>
+                        </div>
                       </div>
-                      <div>
-                        Urugendo Passengers:{" "}
-                        <strong className="text-primary">
-                          {bus.urugendoPassengers}
-                        </strong>{" "}
-                        / {bus.totalCapacity}
-                      </div>
+                      {savedFeedback === trip.id && (
+                        <p className="text-[11px] font-bold text-emerald-600 text-right">
+                          ✓ Empty seat record saved successfully!
+                        </p>
+                      )}
                     </div>
+                  );
+                })}
 
-                    <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
-                      <div className="flex-1 flex items-center gap-2">
-                        <label className="text-[11px] text-text-muted font-medium shrink-0">
-                          Empty Seats:
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          max="29"
-                          value={emptySeatsInputs[bus.id] ?? bus.emptySeats}
-                          onChange={(e) =>
-                            setEmptySeatsInputs({
-                              ...emptySeatsInputs,
-                              [bus.id]: parseInt(e.target.value) || 0,
-                            })
-                          }
-                          className="w-16 px-2 py-1 border border-border rounded-lg text-[12px] font-bold text-center focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                      </div>
-                      <button
-                        onClick={() => handleSaveEmptySeats(bus.id)}
-                        className="bg-primary text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-sm active:scale-95 transition-transform"
-                      >
-                        <Save size={12} />
-                        {savedManifests[bus.id] ? "Saved!" : "Save"}
-                      </button>
-                    </div>
-                  </motion.div>
-                ))}
-            </div>
-          )}
-
-          <button
-            onClick={() => router.push("/agency/reports")}
-            className="w-full bg-white border border-border rounded-xl py-3 flex items-center justify-center gap-2 shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all mt-4"
-          >
-            <Calendar size={16} className="text-text-muted" />
-            <span className="text-[12px] font-semibold text-text-primary">
-              Generate Printable Manifest / Report Table
-            </span>
-            <ChevronRight size={16} className="text-text-muted" />
-          </button>
+            {/* Styled Printable Excel Manifest Action Button */}
+            <button
+              onClick={exportStyledExcelReport}
+              className="w-full mt-4 bg-[#00B14F] hover:bg-[#00B14F]/90 text-white font-bold py-3.5 px-4 rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-wide cursor-pointer"
+            >
+              <FileSpreadsheet size={16} /> Generate Printable Manifest ({manifestSubTab})
+            </button>
+          </div>
         </div>
       )}
     </div>
