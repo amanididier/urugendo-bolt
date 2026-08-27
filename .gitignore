@@ -1,2 +1,25 @@
-node_modules/
+# Dependencies
+/node_modules
+/.pnpm-store
+
+# Next.js build output
+/.next/
+/out/
+/build/
+
+# Caches and logs
+/supabase/.temp/
+*.tsbuildinfo
+typecheck-errors.txt
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
 .env
+.env*.local
+.env.local
+
+# OS / Editor metadata
+.DS_Store
+Thumbs.db

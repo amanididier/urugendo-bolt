@@ -1,22 +1,55 @@
 "use client";
 
-import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
-import { Bell, ArrowRightLeft, ChevronRight, MapPin, Clock, Zap, Navigation, Search } from 'lucide-react';
-import { useApp } from '@/context/app-context';
-import { popularRoutes, getTripsForRoute, formatPrice } from '@/lib/data';
-import { t } from '@/lib/translations';
-import { format } from 'date-fns';
-import Image from 'next/image';
-import { useState, useEffect } from 'react';
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import Image from "next/image";
+import { motion, AnimatePresence } from "framer-motion";
+import { format } from "date-fns";
+import {
+  Bell,
+  ArrowRightLeft,
+  MapPin,
+  Clock,
+  Zap,
+  Navigation,
+  Search,
+} from "lucide-react";
+import { useApp } from "@/context/app-context";
+import { popularRoutes, formatPrice } from "@/lib/data";
+import { fetchTrips } from "@/lib/api";
+import { t } from "@/lib/translations";
+import { useNotifications } from "@/lib/notifications";
+import type { Trip } from "@/lib/types";
 
 export default function HomePage() {
   const router = useRouter();
-  const { search, setSearch, setCityPickerOpen, setCityPickerField, setSelectedTrip, language } = useApp();
+  const {
+    search,
+    setSearch,
+    setCityPickerOpen,
+    setCityPickerField,
+    setSelectedTrip,
+    language,
+    branchNames,
+  } = useApp();
+
+  const { unreadCount } = useNotifications();
   const [currentLocation, setCurrentLocation] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
+  const [liveTrips, setLiveTrips] = useState<Trip[]>([]);
+  const [showPopup, setShowPopup] = useState(false);
 
-  const openCityPicker = (field: 'from' | 'to') => {
+  const liveRoutes = popularRoutes.slice(0, 3);
+
+  useEffect(() => {
+    async function loadLiveTrips() {
+      const data = await fetchTrips(search.from, search.to, search.date);
+      setLiveTrips(data);
+    }
+    loadLiveTrips();
+  }, [search.from, search.to, search.date]);
+
+  const openCityPicker = (field: "from" | "to") => {
     setCityPickerField(field);
     setCityPickerOpen(true);
   };
@@ -26,21 +59,29 @@ export default function HomePage() {
   };
 
   const handleSearch = () => {
-    if (search.from && search.to) router.push('/search');
-  };
-
-  const handleRouteClick = (route: typeof popularRoutes[0]) => {
-    setSearch({ from: route.from, to: route.to });
-    router.push('/search');
-  };
-
-  const handleLiveDeparture = (route: typeof popularRoutes[0]) => {
-    const trips = getTripsForRoute(route.from, route.to, search.date);
-    if (trips[0]) {
-      setSearch({ from: route.from, to: route.to });
-      setSelectedTrip(trips[0]);
-      router.push(`/seats/${trips[0].id}`);
+    if (search.from && search.to) {
+      const isKnown =
+        branchNames.includes(search.from) && branchNames.includes(search.to);
+      if (!isKnown) {
+        setShowPopup(true);
+        return;
+      }
+      router.push("/search");
     }
+  };
+
+  const handleRouteClick = (route: (typeof popularRoutes)[0]) => {
+    if (route.status === "coming_soon") {
+      setShowPopup(true);
+      return;
+    }
+    setSearch({ from: route.from, to: route.to });
+    router.push("/search");
+  };
+
+  const handleLiveDeparture = (trip: Trip) => {
+    setSelectedTrip(trip);
+    router.push(`/seats/${trip.id}`);
   };
 
   const useMyLocation = () => {
@@ -48,27 +89,55 @@ export default function HomePage() {
     setLocationLoading(true);
     navigator.geolocation.getCurrentPosition(
       () => {
-        setCurrentLocation('Nyabugogo, Kigali');
-        setSearch({ from: 'Kigali', to: search.to });
+        setCurrentLocation("Musanze Central");
+        setSearch({ from: "Musanze", to: search.to });
         setLocationLoading(false);
       },
-      () => setLocationLoading(false)
+      () => setLocationLoading(false),
     );
   };
 
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        () => setCurrentLocation('Kigali Area'),
-        () => {}
+        () => setCurrentLocation("Musanze Area"),
+        () => {},
       );
     }
   }, []);
 
-  const liveRoutes = popularRoutes.slice(0, 3);
-
   return (
     <div className="bg-surface-secondary pb-[100px]">
+      {/* Apple-style popup for upcoming/unknown branches */}
+      <AnimatePresence>
+        {showPopup && (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-end justify-center p-4">
+            <motion.div
+              initial={{ y: 100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 100, opacity: 0 }}
+              className="w-full max-w-md bg-white rounded-[32px] p-6 shadow-2xl text-center mb-4"
+            >
+              <div className="w-12 h-12 bg-primary/10 text-primary rounded-2xl flex items-center justify-center mx-auto mb-3 font-bold">
+                <MapPin size={22} />
+              </div>
+              <h3 className="text-[17px] font-black text-slate-900 mb-1">
+                Route Branch Notice
+              </h3>
+              <p className="text-[13px] text-slate-600 leading-relaxed mb-5">
+                we are still starting but dont worry will be there soon
+              </p>
+              <button
+                onClick={() => setShowPopup(false)}
+                className="w-full h-12 bg-primary text-white font-bold text-[14px] rounded-2xl shadow-lg shadow-primary/25 cursor-pointer"
+              >
+                Got it
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
       <div className="bg-primary pt-[56px] px-5 pb-7 rounded-b-[32px] relative overflow-hidden">
         <div className="absolute -top-20 -right-16 w-56 h-56 rounded-full bg-white/8" />
@@ -93,9 +162,14 @@ export default function HomePage() {
               Urugendo<span className="text-accent">.</span>
             </h1>
           </motion.div>
-          <button className="w-10 h-10 rounded-full bg-white/15 flex items-center justify-center relative ring-1 ring-white/20 active:scale-90 transition-transform">
+          <button
+            onClick={() => router.push("/user-notifications")}
+            className="w-10 h-10 rounded-full bg-white/15 flex items-center justify-center relative ring-1 ring-white/20 active:scale-90 transition-transform cursor-pointer"
+          >
             <Bell size={20} className="text-white" />
-            <div className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-accent border-2 border-primary" />
+            {unreadCount > 0 && (
+              <div className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-accent border-2 border-primary" />
+            )}
           </button>
         </div>
 
@@ -104,12 +178,16 @@ export default function HomePage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
         >
-          <p className="text-[14px] text-white/70 mb-0.5">{t('greeting', language)}</p>
-          <h2 className="text-[28px] font-extrabold text-white tracking-tight">{t('whereTo', language)}</h2>
+          <p className="text-[14px] text-white/70 mb-0.5">
+            {t("greeting", language)}
+          </p>
+          <h2 className="text-[28px] font-extrabold text-white tracking-tight">
+            {t("whereTo", language)}
+          </h2>
         </motion.div>
       </div>
 
-      {/* Search card */}
+      {/* Search Card */}
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
@@ -117,31 +195,41 @@ export default function HomePage() {
         className="mx-4 -mt-5 bg-white rounded-[24px] p-4 mb-5 relative z-10 border border-border shadow-card-lg"
       >
         <button
-          onClick={() => openCityPicker('from')}
-          className="w-full flex items-center gap-3 py-2.5 active:opacity-60 transition-opacity"
+          onClick={() => openCityPicker("from")}
+          className="w-full flex items-center gap-3 py-2.5 active:opacity-60 transition-opacity cursor-pointer"
         >
           <div className="w-3.5 h-3.5 rounded-full bg-primary flex-shrink-0 ring-2 ring-primary/15" />
-          <span className={`text-[15px] ${search.from ? 'text-text-primary font-semibold' : 'text-text-muted'}`}>
-            {search.from || t('fromPlaceholder', language)}
+          <span
+            className={`text-[15px] ${
+              search.from
+                ? "text-text-primary font-semibold"
+                : "text-text-muted"
+            }`}
+          >
+            {search.from || t("fromPlaceholder", language)}
           </span>
         </button>
 
         <div className="border-t border-dashed border-border relative">
           <button
             onClick={swapCities}
-            className="absolute right-0 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-primary text-white flex items-center justify-center z-10 active:scale-90 active:rotate-180 transition-all shadow-primary"
+            className="absolute right-0 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-primary text-white flex items-center justify-center z-10 active:scale-90 active:rotate-180 transition-all shadow-primary cursor-pointer"
           >
             <ArrowRightLeft size={14} />
           </button>
         </div>
 
         <button
-          onClick={() => openCityPicker('to')}
-          className="w-full flex items-center gap-3 py-2.5 active:opacity-60 transition-opacity"
+          onClick={() => openCityPicker("to")}
+          className="w-full flex items-center gap-3 py-2.5 active:opacity-60 transition-opacity cursor-pointer"
         >
           <div className="w-3.5 h-3.5 rounded-full bg-accent flex-shrink-0 ring-2 ring-accent/15" />
-          <span className={`text-[15px] ${search.to ? 'text-text-primary font-semibold' : 'text-text-muted'}`}>
-            {search.to || t('toPlaceholder', language)}
+          <span
+            className={`text-[15px] ${
+              search.to ? "text-text-primary font-semibold" : "text-text-muted"
+            }`}
+          >
+            {search.to || t("toPlaceholder", language)}
           </span>
         </button>
 
@@ -149,21 +237,16 @@ export default function HomePage() {
         <button
           onClick={useMyLocation}
           disabled={locationLoading}
-          className="w-full flex items-center justify-center gap-2 py-2.5 text-primary text-[13px] font-medium active:opacity-60 transition-opacity"
+          className="w-full flex items-center justify-center gap-2 py-2.5 text-primary text-[13px] font-medium active:opacity-60 transition-opacity cursor-pointer"
         >
-          {locationLoading ? (
-            <span>Getting location...</span>
-          ) : currentLocation ? (
-            <>
-              <Navigation size={14} />
-              <span>Book from my location ({currentLocation})</span>
-            </>
-          ) : (
-            <>
-              <Navigation size={14} />
-              <span>Use my current location</span>
-            </>
-          )}
+          <Navigation size={14} />
+          <span>
+            {locationLoading
+              ? "Getting location..."
+              : currentLocation
+                ? `Book from my location (${currentLocation})`
+                : "Use my current location"}
+          </span>
         </button>
 
         <div className="border-t border-border" />
@@ -172,20 +255,29 @@ export default function HomePage() {
           <div className="flex-1 flex items-center gap-2 bg-surface-secondary rounded-xl px-3 py-2.5">
             <Clock size={16} className="text-primary" />
             <span className="text-[14px] text-text-secondary font-medium">
-              {format(new Date(search.date), 'MMM dd, yyyy')}
+              {format(
+                new Date(search.date || new Date().toISOString()),
+                "MMM dd, yyyy",
+              )}
             </span>
           </div>
           <div className="flex items-center gap-1.5">
             <button
-              onClick={() => setSearch({ passengers: Math.max(1, search.passengers - 1) })}
-              className="w-8 h-8 rounded-full bg-surface-secondary flex items-center justify-center text-primary text-[18px] font-bold active:scale-90 active:bg-primary-light transition-all"
+              onClick={() =>
+                setSearch({ passengers: Math.max(1, search.passengers - 1) })
+              }
+              className="w-8 h-8 rounded-full bg-surface-secondary flex items-center justify-center text-primary text-[18px] font-bold active:scale-90 transition-all cursor-pointer"
             >
               −
             </button>
-            <span className="text-[15px] font-bold text-text-primary w-5 text-center">{search.passengers}</span>
+            <span className="text-[15px] font-bold text-text-primary w-5 text-center">
+              {search.passengers}
+            </span>
             <button
-              onClick={() => setSearch({ passengers: Math.min(10, search.passengers + 1) })}
-              className="w-8 h-8 rounded-full bg-surface-secondary flex items-center justify-center text-primary text-[18px] font-bold active:scale-90 active:bg-primary-light transition-all"
+              onClick={() =>
+                setSearch({ passengers: Math.min(10, search.passengers + 1) })
+              }
+              className="w-8 h-8 rounded-full bg-surface-secondary flex items-center justify-center text-primary text-[18px] font-bold active:scale-90 transition-all cursor-pointer"
             >
               +
             </button>
@@ -195,18 +287,18 @@ export default function HomePage() {
         <button
           onClick={handleSearch}
           disabled={!search.from || !search.to}
-          className={`w-full h-12 rounded-2xl font-bold text-white text-[15px] mt-1 flex items-center justify-center gap-2 transition-all ${
+          className={`w-full h-12 rounded-2xl font-bold text-white text-[15px] mt-1 flex items-center justify-center gap-2 transition-all cursor-pointer ${
             search.from && search.to
-              ? 'bg-primary shadow-primary active:scale-[0.97]'
-              : 'bg-primary/25 text-primary/50'
+              ? "bg-primary shadow-primary active:scale-[0.97]"
+              : "bg-primary/25 text-primary/50 cursor-not-allowed"
           }`}
         >
           <Search size={16} />
-          {t('searchBuses', language)}
+          {t("searchBuses", language)}
         </button>
       </motion.div>
 
-      {/* Quick info strip */}
+      {/* Quick Info Strip */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -214,13 +306,33 @@ export default function HomePage() {
         className="flex gap-2 px-4 mb-6"
       >
         {[
-          { icon: <MapPin size={14} />, label: t('cities', language), bg: 'bg-primary-light', color: 'text-primary' },
-          { icon: <Zap size={14} />, label: t('operators', language), bg: 'bg-amber-50', color: 'text-accent' },
-          { icon: <Clock size={14} />, label: '24/7', bg: 'bg-blue-50', color: 'text-blue-600' },
+          {
+            icon: <MapPin size={14} />,
+            label: t("cities", language),
+            bg: "bg-primary-light",
+            color: "text-primary",
+          },
+          {
+            icon: <Zap size={14} />,
+            label: t("operators", language),
+            bg: "bg-amber-50",
+            color: "text-accent",
+          },
+          {
+            icon: <Clock size={14} />,
+            label: "24/7",
+            bg: "bg-blue-50",
+            color: "text-blue-600",
+          },
         ].map((item, i) => (
-          <div key={i} className={`flex-1 flex items-center justify-center gap-1.5 ${item.bg} rounded-xl py-2.5`}>
+          <div
+            key={i}
+            className={`flex-1 flex items-center justify-center gap-1.5 ${item.bg} rounded-xl py-2.5`}
+          >
             <span className={item.color}>{item.icon}</span>
-            <span className={`text-[12px] font-bold ${item.color}`}>{item.label}</span>
+            <span className={`text-[12px] font-bold ${item.color}`}>
+              {item.label}
+            </span>
           </div>
         ))}
       </motion.div>
@@ -235,13 +347,17 @@ export default function HomePage() {
         <div className="flex items-center justify-between px-5 mb-3">
           <div className="flex items-center gap-2">
             <div className="w-1 h-5 rounded-full bg-primary" />
-            <h3 className="text-[17px] font-bold text-text-primary">{t('popularRoutes', language)}</h3>
+            <h3 className="text-[17px] font-bold text-text-primary">
+              {t("popularRoutes", language)}
+            </h3>
           </div>
-          <button className="text-[13px] text-primary font-semibold">{t('seeAll', language)}</button>
+          <button className="text-[13px] text-primary font-semibold cursor-pointer">
+            {t("seeAll", language)}
+          </button>
         </div>
         <div
           className="flex gap-3 px-5 overflow-x-auto pb-1"
-          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+          style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
         >
           {popularRoutes.map((route, i) => (
             <motion.button
@@ -249,32 +365,52 @@ export default function HomePage() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3 + i * 0.05 }}
-              onClick={() => route.status === 'coming_soon' ? router.push('/waitlist') : handleRouteClick(route)}
-              disabled={route.status === 'coming_soon'}
-              className={`flex-shrink-0 rounded-2xl border p-4 min-w-[160px] active:scale-[0.97] transition-transform text-left ${
-                route.status === 'coming_soon'
-                  ? 'bg-gray-50 border-gray-200 opacity-60'
-                  : 'bg-white border-border shadow-card hover:shadow-card-lg transition-shadow'
+              onClick={() => handleRouteClick(route)}
+              className={`flex-shrink-0 rounded-2xl border p-4 min-w-[160px] active:scale-[0.97] transition-transform text-left cursor-pointer ${
+                route.status === "coming_soon"
+                  ? "bg-gray-50 border-gray-200 opacity-60"
+                  : "bg-white border-border shadow-card hover:shadow-card-lg"
               }`}
             >
               <div className="flex items-center gap-2 mb-2.5">
-                <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
-                  route.status === 'coming_soon' ? 'bg-gray-200' : 'bg-primary-light'
-                }`}>
-                  <MapPin size={14} className={route.status === 'coming_soon' ? 'text-gray-400' : 'text-primary'} />
+                <div
+                  className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                    route.status === "coming_soon"
+                      ? "bg-gray-200"
+                      : "bg-primary-light"
+                  }`}
+                >
+                  <MapPin
+                    size={14}
+                    className={
+                      route.status === "coming_soon"
+                        ? "text-gray-400"
+                        : "text-primary"
+                    }
+                  />
                 </div>
-                <span className={`text-[13px] font-bold ${
-                  route.status === 'coming_soon' ? 'text-gray-400' : 'text-text-primary'
-                }`}>
+                <span
+                  className={`text-[13px] font-bold ${
+                    route.status === "coming_soon"
+                      ? "text-gray-400"
+                      : "text-text-primary"
+                  }`}
+                >
                   {route.from} → {route.to}
                 </span>
               </div>
-              {route.status === 'coming_soon' ? (
-                <div className="text-[12px] text-gray-400 font-medium">Coming Soon</div>
+              {route.status === "coming_soon" ? (
+                <div className="text-[12px] text-gray-400 font-medium">
+                  Soon Available
+                </div>
               ) : (
                 <>
-                  <div className="text-[20px] font-extrabold text-primary">{formatPrice(route.price)}</div>
-                  <div className="text-[12px] text-text-muted mt-1">{route.duration}</div>
+                  <div className="text-[20px] font-extrabold text-primary">
+                    {formatPrice(route.price)}
+                  </div>
+                  <div className="text-[12px] text-text-muted mt-1">
+                    {route.duration}
+                  </div>
                 </>
               )}
             </motion.button>
@@ -291,60 +427,107 @@ export default function HomePage() {
       >
         <div className="flex items-center gap-2 mb-3">
           <div className="w-1 h-5 rounded-full bg-primary" />
-          <h3 className="text-[17px] font-bold text-text-primary">{t('liveDepartures', language)}</h3>
+          <h3 className="text-[17px] font-bold text-text-primary">
+            {t("liveDepartures", language)}
+          </h3>
           <div className="flex items-center gap-1 bg-badge-green-bg px-2 py-0.5 rounded-full">
             <motion.div
               animate={{ opacity: [1, 0.2, 1] }}
               transition={{ duration: 1.4, repeat: Infinity }}
               className="w-1.5 h-1.5 rounded-full bg-badge-green-text"
             />
-            <span className="text-[11px] font-bold text-badge-green-text">{t('live', language)}</span>
+            <span className="text-[11px] font-bold text-badge-green-text">
+              {t("live", language)}
+            </span>
           </div>
         </div>
 
         <div className="space-y-2.5">
-          {liveRoutes.map((route, i) => {
-            const trips = getTripsForRoute(route.from, route.to, search.date);
-            const trip = trips[i % trips.length];
-            return (
-              <motion.button
-                key={route.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.4 + i * 0.06 }}
-                onClick={() => handleLiveDeparture(route)}
-                className="w-full bg-white rounded-2xl border border-border p-3.5 flex items-center gap-3 active:scale-[0.98] active:bg-primary-light transition-all shadow-card text-left"
-              >
+          {liveTrips.length > 0
+            ? liveTrips.slice(0, 4).map((trip, i) => {
+                const op = trip.operator as any;
+                const operatorName =
+                  typeof op === "string" ? op : op?.name || "Bus Operator";
+                const operatorGradient =
+                  typeof op === "object" && op?.gradient
+                    ? op.gradient
+                    : "linear-gradient(135deg, #FF6B1A, #FF8800)";
+                const operatorIcon =
+                  typeof op === "object" && (op?.emoji || op?.logo)
+                    ? op.emoji || op.logo
+                    : "🚌";
+
+                return (
+                  <motion.button
+                    key={trip.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.4 + i * 0.06 }}
+                    onClick={() => handleLiveDeparture(trip)}
+                    className="w-full bg-white rounded-2xl border border-border p-3.5 flex items-center gap-3 active:scale-[0.98] active:bg-primary-light transition-all shadow-card text-left cursor-pointer"
+                  >
+                    <div
+                      className="w-11 h-11 rounded-2xl flex items-center justify-center text-lg flex-shrink-0"
+                      style={{ background: operatorGradient }}
+                    >
+                      {operatorIcon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[14px] font-bold text-text-primary">
+                        {trip.from} → {trip.to}
+                      </div>
+                      <div className="text-[12px] text-text-muted mt-0.5">
+                        <span className="text-primary font-semibold">
+                          {operatorName}
+                        </span>
+                        <span className="mx-1.5">·</span>
+                        <span>{trip.departureTime}</span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[16px] font-extrabold text-primary">
+                        {formatPrice(trip.price)}
+                      </div>
+                      <div className="text-[11px] text-badge-green-text font-medium">
+                        {trip.availableSeats} {t("seats", language)}
+                      </div>
+                    </div>
+                  </motion.button>
+                );
+              })
+            : liveRoutes.map((route) => (
                 <div
-                  className="w-11 h-11 rounded-2xl flex items-center justify-center text-lg flex-shrink-0"
-                  style={{ background: trip.operator.gradient }}
+                  key={route.id}
+                  onClick={() => handleRouteClick(route)}
+                  className="w-full bg-white rounded-2xl border border-border p-3.5 flex items-center justify-between shadow-card cursor-pointer"
                 >
-                  {trip.operator.emoji}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[14px] font-bold text-text-primary">
-                    {route.from} → {route.to}
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-orange-100 flex items-center justify-center text-xl">
+                      🚌
+                    </div>
+                    <div>
+                      <div className="text-[14px] font-bold text-text-primary">
+                        {route.from} → {route.to}
+                      </div>
+                      <div className="text-[12px] text-text-muted">
+                        {route.duration}
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-[12px] text-text-muted mt-0.5">
-                    <span className="text-primary font-semibold">{trip.operator.name}</span>
-                    <span className="mx-1.5">·</span>
-                    <span>{trip.departureTime}</span>
+                  <div className="text-right">
+                    <div className="text-[16px] font-extrabold text-primary">
+                      {formatPrice(route.price)}
+                    </div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-[16px] font-extrabold text-primary">{formatPrice(trip.price)}</div>
-                  <div className="text-[11px] text-badge-green-text font-medium">{trip.availableSeats} {t('seats', language)}</div>
-                </div>
-              </motion.button>
-            );
-          })}
+              ))}
         </div>
       </motion.div>
 
-      {/* Rugendo AI tip - removed for V0 */}
-
       <div className="text-center pb-4">
-        <p className="text-[11px] text-text-muted">{t('madeWith', language)}</p>
+        <p className="text-[11px] text-text-muted font-medium">
+          {t("madeWith", language)}
+        </p>
       </div>
     </div>
   );
