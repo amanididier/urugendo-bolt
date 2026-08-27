@@ -26,13 +26,13 @@ const agentTabs = [
   { path: "/agency", icon: Bus, label: "Dashboard" },
   { path: "/agency/schedule", icon: Calendar, label: "Schedule" },
   { path: "/agency/reports", icon: FileText, label: "Reports" },
-  { path: "/profile", icon: Settings, label: "Settings" },
+  { path: "/agency/profile", icon: Settings, label: "Profile" },
 ];
 
 const driverTabs = [
-  { path: "/driver", icon: Bus, label: "Trips" },
-  { path: "/driver/passengers", icon: Users, label: "Passengers" },
-  { path: "/driver/map", icon: MapPin, label: "Map" },
+  { path: "/agency/driver", icon: Bus, label: "Trips" },
+  { path: "/agency/driver/passengers", icon: Users, label: "Passengers" },
+  { path: "/agency/driver/map", icon: MapPin, label: "Map" },
   { path: "/profile", icon: User, label: "Profile" },
 ];
 
@@ -44,24 +44,24 @@ export function BottomNav({ role }: BottomNavProps) {
   const pathname = usePathname();
   const router = useRouter();
 
-  // Hide nav bar strictly on initial splash and authentication screens
-  const isHiddenRoute =
-    pathname === "/splash" ||
+  // Instantly return null on splash, home root, login routes, or manager dashboard
+  if (
+    !pathname ||
     pathname === "/" ||
-    pathname === "/splash/" ||
-    pathname === "/login" ||
-    pathname === "/agency/login";
-
-  if (isHiddenRoute) {
+    pathname.startsWith("/splash") ||
+    pathname.startsWith("/user-login") ||
+    pathname.startsWith("/agency/agency-login") ||
+    pathname.startsWith("/manager")
+  ) {
     return null;
   }
 
-  // Route-first role resolution: default all passenger flow pages (including seats & payment) to passenger
+  // Route-first role resolution
   let activeRole: UserRole = "passenger";
-  if (pathname.startsWith("/agency")) {
-    activeRole = "agent";
-  } else if (pathname.startsWith("/driver")) {
+  if (pathname.startsWith("/agency/driver")) {
     activeRole = "driver";
+  } else if (pathname.startsWith("/agency")) {
+    activeRole = "agent";
   } else {
     activeRole = "passenger";
   }
@@ -74,15 +74,18 @@ export function BottomNav({ role }: BottomNavProps) {
         : passengerTabs;
 
   const isActive = (path: string) => {
-    if (path === "/home") return pathname === "/home" || pathname === "/";
+    if (path === "/home") return pathname === "/home";
     if (path === "/agency")
       return (
         pathname === "/agency" ||
         (pathname.startsWith("/agency") &&
           !pathname.includes("schedule") &&
-          !pathname.includes("reports"))
+          !pathname.includes("reports") &&
+          !pathname.includes("profile") &&
+          !pathname.includes("driver"))
       );
-    if (path === "/driver") return pathname === "/driver";
+    if (path === "/agency/driver") return pathname === "/agency/driver";
+    if (path === "/agency/profile") return pathname === "/agency/profile";
     if (path === "/profile") return pathname.startsWith("/profile");
     return pathname.startsWith(path);
   };

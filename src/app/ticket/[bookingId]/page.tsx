@@ -25,21 +25,22 @@ import {
   QrCode,
   ShieldCheck,
   CheckCheck,
-  Edit3,
 } from "lucide-react";
 import { fetchBookingById } from "@/lib/api";
 import type { Booking } from "@/lib/types";
 
-// Agency Contact Details
-const VIRUNGA_PHONE = "+250782490611";
-const VIRUNGA_WHATSAPP = "250782490611";
+// Default Agency Contact Fallbacks
+const DEFAULT_PHONE = "+250782490611";
 
 // Multilingual Translations Dictionary
 const translations = {
   en: {
     eTicket: "E-Ticket",
     bookingConfirmed: "Booking Confirmed",
+    contactAgencyCard: "Contact Agency Support",
     verificationPending: "Verification Pending",
+    verificationTimeoutNotice:
+      "If the verification process takes longer than 20 minutes, you may contact the agency through the support options below.",
     paymentUnverified: "Payment Unverified",
     ticketMissed: "Trip Missed",
     ticketUsed: "Ticket Used",
@@ -49,8 +50,9 @@ const translations = {
     momoPending: "MoMo payment is being verified",
     recordNotFound: "Record not found by agency",
     paymentInProgress: "Payment Verification in Progress",
-    momoNotice:
-      "Agents are cross-checking your MoMo payment. If delayed, contact support below.",
+    verificationWaitTitle: "Verification in Progress",
+    verificationWaitDesc: (agency: string, branch: string) =>
+      `Your ticket is being verified by ${agency} -> ${branch} agents and you'll be notified once its verified.`,
     from: "FROM",
     to: "TO",
     seat: "Seat",
@@ -71,7 +73,8 @@ const translations = {
     tripDescription:
       "A scenic journey through Rwanda's beautiful landscape. The route passes through terraced hills and local villages with brief terminal stops.",
     needHelp: "Need Help with",
-    helpDesc: `Contact agency support directly at ${VIRUNGA_PHONE} for route inquiries or status assistance.`,
+    helpDesc: (phone: string) =>
+      `Contact agency support directly at ${phone} for route inquiries or status assistance.`,
     whatsapp: "WhatsApp",
     callAgency: "Call Agency",
     loading: "Loading e-ticket...",
@@ -81,28 +84,32 @@ const translations = {
   },
   rw: {
     eTicket: "Ikarita Y'urugendo",
-    bookingConfirmed: "Urugendo Yaremejwe",
+    bookingConfirmed: "Urugendo Rwemejwe",
     verificationPending: "Kugenzura Biracyakorwa",
     paymentUnverified: "Kwishyura Ntibyemejwe",
-    ticketMissed: "Urugendo Rwacitse",
-    ticketUsed: "Ikarita Yakoreshejwe",
-    passActive: "Ikarita yawe ya mu bus irakora",
-    passMissed: "Igihe cyo guhaguruka cyararenze",
-    passUsed: "Ikarita yegenzuwe n'abayobozi",
-    momoPending: "Ikwishyuza rya MoMo riracyasuzumwa",
+    contactAgencyCard: "Vugana n'Abakozi ba Agence",
+    verificationTimeoutNotice:
+      "Niba igikorwa cyo kugenzura gifashe iminota irenga 20, ushobora kuvugana na agence ukoresheje ubufasha buri hano hepfo.",
+    ticketMissed: "Urugendo Rwagucitse",
+    ticketUsed: "Itike Yakoreshejwe",
+    passActive: "Itike yawe ya bisi irakora",
+    passMissed: "Igihe cyo guhaguruka cyarenze",
+    passUsed: "Itike yagenzuwe kandi yarakoreshejwe",
+    momoPending: "Ubwishyu bwa MoMo buracyasuzumwa",
     recordNotFound: "Ntitwashoboye kubona amakuru mu buyobozi",
-    paymentInProgress: "Gusuzuma Kwishyura Biragenda Korwa",
-    momoNotice:
-      "Aba agent barimo baragenzura kwishyura kwa MoMo. Niba bitinze, hamagara ubufasha bukurikira.",
+    paymentInProgress: "Gusuzuma Kwishyura Birigukorwa",
+    verificationWaitTitle: "Kugenzura Biracyakorwa",
+    verificationWaitDesc: (agency: string, branch: string) =>
+      `Itike yawe irimo igenzurwa n'abakozi ba ${agency} -> ${branch}, kandi uzamenyeshwa nimara kwemezwa.`,
     from: "KUVA",
     to: "KUGERA",
     seat: "Icyafuraha",
-    ticketCode: "ICODE Y'IKARITA YAWE",
-    scanPrompt: "Sikana kugira ngo wemezwe ku irembo",
+    ticketCode: "IKODE Y'IKARITA YAWE",
+    scanPrompt: "Sikana kuri QR ku irembo ry'ikigo kugira ngo winjire vuba",
     departure: "Guhaguruka",
     arrival: "Kugera",
     date: "Itariki",
-    plateNo: "Pulaaki",
+    plateNo: "Nomero ya Plake",
     passenger: "Umugenzi",
     momoAccount: "Konti ya MoMo",
     totalPaid: "Ayishyuwe Yose",
@@ -112,9 +119,10 @@ const translations = {
     linkCopied: "Ihuza Ryakopywe!",
     aboutTrip: "Ibyerekeye Uru Rugendo",
     tripDescription:
-      "Urugendo rwiza mu birunga no mu cyaro cya Rwanda. Bisi ihagarara mu nzira igihe gito ku bitegyerezo byagenwe.",
+      "Urugendo rwiza mu misozi n'ibyiza by'u Rwanda. Bisi ihagarara mu nzira igihe gito ku bituro byagenwe.",
     needHelp: "Ukeneye Ubufasha kuri",
-    helpDesc: `Hamagara abakozi ba agence kuri ${VIRUNGA_PHONE} ku bindi bisobanuro n'ubufasha bw'urugendo.`,
+    helpDesc: (phone: string) =>
+      `Hamagara abakozi ba agence kuri ${phone} ku bindi bisobanuro n'ubufasha bw'urugendo.`,
     whatsapp: "WhatsApp",
     callAgency: "Hamagara Agence",
     loading: "Ikarita irimo kurundwa...",
@@ -160,24 +168,11 @@ export default function TicketDetailPage() {
   const [copied, setCopied] = useState(false);
   const [shared, setShared] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
-  const [liveTime, setLiveTime] = useState("");
 
-  // Passenger Name Customization States
-  const [passengerNameInput, setPassengerNameInput] = useState("");
-  const [isSavedName, setIsSavedName] = useState(false);
-  const [nameSavedSuccess, setNameSavedSuccess] = useState(false);
+  // Dynamic branch contact phone state
+  const [dynamicBranchPhone, setDynamicBranchPhone] = useState(DEFAULT_PHONE);
 
   const pdfCardRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const updateTime = () => {
-      const now = new Date();
-      setLiveTime(now.toTimeString().split(" ")[0]);
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   useEffect(() => {
     async function loadTicket() {
@@ -208,9 +203,16 @@ export default function TicketDetailPage() {
 
         if (found) {
           setBooking(found);
-          setPassengerNameInput(
-            found.passengerName || found.momoAccountName || "Passenger",
-          );
+
+          if (typeof window !== "undefined" && found.trip?.from) {
+            const cityName = found.trip.from.toLowerCase();
+            const storedPhone = localStorage.getItem(
+              `branch_phone_city_${cityName}`,
+            );
+            if (storedPhone) {
+              setDynamicBranchPhone(storedPhone);
+            }
+          }
         }
       } catch (err) {
         console.error("Error loading ticket details:", err);
@@ -222,53 +224,6 @@ export default function TicketDetailPage() {
     if (bookingId) loadTicket();
   }, [bookingId]);
 
-  const handleSavePassengerName = () => {
-    if (!booking || !passengerNameInput.trim()) return;
-
-    const updatedBooking = {
-      ...booking,
-      passengerName: passengerNameInput.trim(),
-    };
-
-    setBooking(updatedBooking);
-    setIsSavedName(true);
-    setNameSavedSuccess(true);
-    setTimeout(() => setNameSavedSuccess(false), 2500);
-
-    // Persist saved name across local storage
-    try {
-      const latest = localStorage.getItem("latest_booking");
-      if (latest) {
-        const parsed: Booking = JSON.parse(latest);
-        if (
-          parsed.id === booking.id ||
-          parsed.shortCode === booking.shortCode
-        ) {
-          localStorage.setItem(
-            "latest_booking",
-            JSON.stringify({
-              ...parsed,
-              passengerName: passengerNameInput.trim(),
-            }),
-          );
-        }
-      }
-
-      const guestBookings = localStorage.getItem("guest_bookings");
-      if (guestBookings) {
-        const parsed: Booking[] = JSON.parse(guestBookings);
-        const updatedList = parsed.map((b) =>
-          b.id === booking.id || b.shortCode === booking.shortCode
-            ? { ...b, passengerName: passengerNameInput.trim() }
-            : b,
-        );
-        localStorage.setItem("guest_bookings", JSON.stringify(updatedList));
-      }
-    } catch (e) {
-      console.error("Failed to update passenger name in localStorage", e);
-    }
-  };
-
   const copyShortCode = () => {
     if (booking?.shortCode) {
       navigator.clipboard.writeText(booking.shortCode);
@@ -277,17 +232,18 @@ export default function TicketDetailPage() {
     }
   };
 
+  const cleanPhone = dynamicBranchPhone.replace(/\D/g, "");
   const openWhatsApp = () => {
     const message = encodeURIComponent(
       `Hello Virunga Express, I am inquiring about my booking ID: ${
         booking?.shortCode || bookingId
       }.`,
     );
-    window.open(`https://wa.me/${VIRUNGA_WHATSAPP}?text=${message}`, "_blank");
+    window.open(`https://wa.me/${cleanPhone}?text=${message}`, "_blank");
   };
 
   const callAgency = () => {
-    window.open(`tel:${VIRUNGA_PHONE}`, "_self");
+    window.open(`tel:${dynamicBranchPhone}`, "_self");
   };
 
   // High-Resolution PDF Generator
@@ -391,14 +347,14 @@ export default function TicketDetailPage() {
     );
   }
 
-  // Ticket Status State Logic
   const status = (booking.status || "confirmed").toLowerCase();
   const isPending = status === "pending";
   const isRejected = status === "rejected";
   const isMissed = status === "missed";
-  const isUsed = status === "used";
+  const isUsed = status === "used" || status === "boarded";
 
   const operatorName = booking.trip?.operator?.name || "Virunga Express";
+  const branchName = getCityName(booking.trip?.from, "Musanze Terminal");
   const plateNumber = booking.trip?.plateNumber || "RAD 100B";
   const busType = booking.trip?.busType || "Coaster Express";
 
@@ -418,16 +374,15 @@ export default function TicketDetailPage() {
 
   return (
     <div className="min-h-screen bg-slate-100/80 pb-12 font-sans antialiased">
-      {/* Off-Screen Clean Pass Template (Captured for PDF Download) */}
+      {/* Off-Screen PDF Template */}
       <div className="fixed -left-[9999px] top-0 pointer-events-none">
         <div
           ref={pdfCardRef}
           className="w-[840px] bg-white rounded-[28px] overflow-hidden p-0 font-sans shadow-2xl relative border-2 border-emerald-600/30 text-slate-900"
         >
-          {/* Top Brand Green Header */}
           <div className="bg-[#00B14F] text-white px-8 py-5 flex items-center justify-between">
             <div className="flex items-center gap-3.5">
-              <div className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center text-2xl shadow-inner">
+              <div className="w-11 h-11 rounded-2xl bg-white/25 backdrop-blur-md flex items-center justify-center text-2xl shadow-inner">
                 ⛰️
               </div>
               <div>
@@ -440,7 +395,6 @@ export default function TicketDetailPage() {
               </div>
             </div>
 
-            {/* Status Badge */}
             <div className="flex items-center gap-2">
               <span
                 className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-wider shadow-sm ${
@@ -469,15 +423,12 @@ export default function TicketDetailPage() {
             </div>
           </div>
 
-          {/* Clean Main Pass Content */}
           <div className="p-6 bg-slate-50/60 grid grid-cols-12 gap-4 items-stretch">
-            {/* Left Section - Route & Details Grid */}
             <div className="col-span-8 flex flex-col justify-between pr-2 border-r border-dashed border-slate-200">
-              {/* Route Indicator */}
               <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs mb-3">
                 <div>
                   <span className="text-[10px] uppercase font-black tracking-widest text-slate-400">
-                    DEPARTURE
+                    {t.from}
                   </span>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">
                     {fromCity}
@@ -503,7 +454,7 @@ export default function TicketDetailPage() {
 
                 <div className="text-right">
                   <span className="text-[10px] uppercase font-black tracking-widest text-slate-400">
-                    DESTINATION
+                    {t.to}
                   </span>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">
                     {toCity}
@@ -514,11 +465,10 @@ export default function TicketDetailPage() {
                 </div>
               </div>
 
-              {/* Structured Ticket Details */}
               <div className="grid grid-cols-3 gap-3 bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
                 <div>
                   <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block mb-0.5">
-                    PASSENGER
+                    {t.passenger}
                   </span>
                   <p className="text-sm font-bold text-slate-900 truncate">
                     {booking.passengerName}
@@ -527,7 +477,7 @@ export default function TicketDetailPage() {
 
                 <div>
                   <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block mb-0.5">
-                    DATE & TIME
+                    {t.date}
                   </span>
                   <p className="text-sm font-bold text-slate-900">
                     {booking.trip?.date || booking.bookingDate}
@@ -539,16 +489,16 @@ export default function TicketDetailPage() {
 
                 <div>
                   <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block mb-0.5">
-                    ASSIGNED SEAT
+                    {t.seat}
                   </span>
                   <span className="inline-block px-2.5 py-0.5 bg-emerald-50 text-[#00B14F] font-black text-sm rounded-lg border border-emerald-200">
-                    SEAT {booking.seat || "3C"}
+                    {t.seat} {booking.seat || "3C"}
                   </span>
                 </div>
 
                 <div>
                   <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block mb-0.5">
-                    BUS PLATE
+                    {t.plateNo}
                   </span>
                   <p className="text-xs font-bold text-slate-700">
                     {plateNumber}
@@ -557,14 +507,14 @@ export default function TicketDetailPage() {
 
                 <div>
                   <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block mb-0.5">
-                    VEHICLE CLASS
+                    Vehicle Class
                   </span>
                   <p className="text-xs font-bold text-slate-700">{busType}</p>
                 </div>
 
                 <div>
                   <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block mb-0.5">
-                    TOTAL FARE
+                    {t.totalPaid}
                   </span>
                   <p className="text-sm font-black text-[#00B14F]">
                     {booking.totalAmount?.toLocaleString() ||
@@ -576,7 +526,6 @@ export default function TicketDetailPage() {
               </div>
             </div>
 
-            {/* Dedicated Clear QR Verification Box */}
             <div className="col-span-4 bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs flex flex-col items-center justify-center text-center">
               <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-center mb-2">
                 <QRCodeCanvas
@@ -591,27 +540,18 @@ export default function TicketDetailPage() {
 
               <div className="w-full space-y-1">
                 <span className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase block">
-                  BOOKING REFERENCE
+                  {t.ticketCode}
                 </span>
                 <div className="text-xl font-black font-mono tracking-widest text-[#00B14F] bg-emerald-50 px-3 py-1 rounded-xl border border-emerald-200">
                   {booking.shortCode}
                 </div>
-                <p className="text-[9.5px] text-slate-400 font-semibold pt-1">
-                  Scan QR at terminal gate for instant boarding
-                </p>
               </div>
             </div>
-          </div>
-
-          {/* Clean Footer */}
-          <div className="px-8 py-2.5 bg-slate-900 text-slate-300 text-[11px] font-semibold flex items-center justify-between border-t border-slate-800">
-            <span>Issued via Urugendo Digital Ticketing System</span>
-            <span>Support: {VIRUNGA_PHONE}</span>
           </div>
         </div>
       </div>
 
-      {/* Mobile App Header Banner */}
+      {/* Header Banner */}
       <div
         className={`pt-5 pb-7 px-4 text-white transition-colors relative rounded-b-3xl shadow-md ${
           isRejected
@@ -682,120 +622,171 @@ export default function TicketDetailPage() {
         </div>
       </div>
 
-      {/* Main Content View Area */}
-      <div className="px-3.5 mt-3 space-y-3 max-w-md mx-auto">
-        {/* Pending Notice Banner */}
-        {isPending && (
+      {/* Verification Waiting Screen */}
+      {isPending ? (
+        <div className="max-w-md mx-auto px-4 mt-6">
           <motion.div
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-amber-50 border border-amber-200/80 p-3 rounded-2xl space-y-1 shadow-2xs"
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-3xl border border-slate-200/80 shadow-xl p-6 sm:p-8 text-center flex flex-col items-center justify-center relative overflow-hidden my-4"
           >
-            <div className="flex items-center gap-2 text-amber-900 font-bold text-[13px]">
-              <AlertCircle size={16} className="text-amber-600 flex-shrink-0" />
-              <span>{t.paymentInProgress}</span>
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-amber-400 via-orange-500 to-amber-500" />
+
+            <div className="relative mb-4">
+              <div className="absolute -inset-3 bg-amber-400/20 rounded-full animate-ping" />
+              <div className="w-18 h-18 bg-amber-50 rounded-full border-2 border-amber-200 flex items-center justify-center text-amber-600 relative shadow-inner">
+                <Clock size={32} className="animate-pulse text-amber-500" />
+              </div>
             </div>
-            <p className="text-[11.5px] text-amber-700 leading-tight">
-              {t.momoNotice}
+
+            <h2 className="text-[19px] font-black text-slate-900 tracking-tight mb-2">
+              {t.verificationWaitTitle}
+            </h2>
+
+            <p className="text-[13.5px] text-slate-600 font-medium leading-relaxed max-w-xs mb-5">
+              {t.verificationWaitDesc(operatorName, branchName)}
             </p>
-          </motion.div>
-        )}
 
-        {/* Visible Mobile App Ticket Pass */}
-        <div className="bg-white rounded-3xl border border-slate-200/80 overflow-hidden shadow-sm p-0">
-          <div className="px-4 py-2.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-full bg-emerald-100/80 flex items-center justify-center text-[14px] shadow-2xs">
-                ⛰️
-              </div>
-              <div>
-                <h3 className="font-bold text-[13.5px] text-slate-900 leading-none">
-                  {operatorName}
-                </h3>
-                <p className="text-[10px] text-slate-500 font-medium flex items-center gap-1 mt-0.5">
-                  <Bus size={11} className="text-slate-400" />
-                  <span>{busType}</span>
-                </p>
-              </div>
-            </div>
-            <Sparkles size={15} className="text-slate-400" />
-          </div>
-
-          <div className="p-3.5 border-b border-dashed border-slate-200 space-y-3">
-            <div className="flex items-center justify-between gap-1">
-              <div className="text-left flex-1 min-w-0">
-                <span className="text-[10px] font-extrabold tracking-wider text-slate-400 uppercase block">
-                  {t.from}
-                </span>
-                <h2 className="text-[17px] font-black text-slate-900 leading-tight truncate">
-                  {fromCity}
-                </h2>
-                <p className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
-                  {fromTerminal}
-                </p>
-              </div>
-
-              <div className="flex flex-col items-center justify-center px-1 min-w-[95px] flex-shrink-0">
-                <div className="inline-flex items-center gap-1 bg-emerald-50 border border-emerald-100 text-[#00B14F] px-2 py-0.5 rounded-full text-[10.5px] font-bold mb-1 shadow-2xs">
-                  <span>💺</span>
-                  <span>
-                    {t.seat} {booking.seat || "3C"}
-                  </span>
-                </div>
-                <div className="w-full flex items-center justify-center gap-1 text-slate-300">
-                  <div className="h-[1.5px] bg-slate-200 flex-1 rounded-full" />
-                  <span className="text-[11px] font-bold text-[#00B14F]">
-                    →
-                  </span>
-                  <div className="h-[1.5px] bg-slate-200 flex-1 rounded-full" />
-                </div>
-                <span className="text-[9.5px] font-bold text-slate-400 mt-0.5">
-                  {booking.trip?.duration || "2h 00m"}
-                </span>
-              </div>
-
-              <div className="text-right flex-1 min-w-0">
-                <span className="text-[10px] font-extrabold tracking-wider text-slate-400 uppercase block">
-                  {t.to}
-                </span>
-                <h2 className="text-[17px] font-black text-slate-900 leading-tight truncate">
-                  {toCity}
-                </h2>
-                <p className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
-                  {toTerminal}
-                </p>
-              </div>
+            <div className="w-full bg-amber-50/80 border border-amber-200/90 rounded-2xl p-3.5 mb-6 text-left flex items-start gap-2.5 shadow-2xs">
+              <Info size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
+              <p className="text-[11.5px] text-amber-900 font-medium leading-relaxed">
+                {t.verificationTimeoutNotice}
+              </p>
             </div>
 
-            <div className="pt-2 border-t border-slate-100 text-center flex flex-col items-center justify-center">
-              <span className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase">
-                {t.ticketCode}
-              </span>
-
-              <div className="flex items-center justify-center gap-2 mt-0.5">
-                <span className="text-[28px] font-black tracking-wider text-[#7C3AED]">
-                  {booking.shortCode}
-                </span>
+            <div className="w-full space-y-2.5 mb-6">
+              <div className="text-[11px] font-extrabold text-slate-400 uppercase tracking-widest text-left px-1">
+                {t.contactAgencyCard} ({branchName})
+              </div>
+              <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={copyShortCode}
-                  className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl active:scale-95 transition-transform"
+                  onClick={openWhatsApp}
+                  className="flex flex-col items-center justify-center p-3 bg-emerald-50 hover:bg-emerald-100 text-[#00B14F] border border-emerald-200/80 rounded-2xl transition-all active:scale-95 shadow-2xs cursor-pointer"
                 >
-                  {copied ? (
-                    <Check size={14} className="text-emerald-600" />
-                  ) : (
-                    <Copy size={14} />
-                  )}
+                  <div className="flex items-center gap-1.5 font-bold text-[12.5px] mb-0.5">
+                    <MessageCircle size={15} />
+                    <span>{t.whatsapp}</span>
+                  </div>
+                  <span className="text-[10px] font-mono opacity-80">
+                    +{cleanPhone}
+                  </span>
+                </button>
+                <button
+                  onClick={callAgency}
+                  className="flex flex-col items-center justify-center p-3 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl transition-all active:scale-95 shadow-2xs cursor-pointer"
+                >
+                  <div className="flex items-center gap-1.5 font-bold text-[12.5px] mb-0.5">
+                    <Phone size={15} />
+                    <span>{t.callAgency}</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-slate-300">
+                    {dynamicBranchPhone}
+                  </span>
                 </button>
               </div>
+            </div>
 
-              <div className="inline-flex items-center gap-1.5 bg-slate-100/80 px-2.5 py-0.5 rounded-full text-[10px] font-mono text-slate-500 mt-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                <span>{liveTime || "10:48:52"}</span>
+            <button
+              onClick={() => router.push("/tickets")}
+              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[13.5px] py-3 rounded-2xl transition-all active:scale-[0.98] cursor-pointer border border-slate-200"
+            >
+              {t.backToTickets}
+            </button>
+          </motion.div>
+        </div>
+      ) : (
+        <div className="px-3.5 mt-3 space-y-3 max-w-md mx-auto">
+          <div className="bg-white rounded-3xl border border-slate-200/80 overflow-hidden shadow-sm p-0">
+            <div className="px-4 py-2.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-emerald-100/80 flex items-center justify-center text-[14px] shadow-2xs">
+                  ⛰️
+                </div>
+                <div>
+                  <h3 className="font-bold text-[13.5px] text-slate-900 leading-none">
+                    {operatorName}
+                  </h3>
+                  <p className="text-[10px] text-slate-500 font-medium flex items-center gap-1 mt-0.5">
+                    <Bus size={11} className="text-slate-400" />
+                    <span>{busType}</span>
+                  </p>
+                </div>
+              </div>
+              <Sparkles size={15} className="text-slate-400" />
+            </div>
+
+            <div className="p-3.5 border-b border-dashed border-slate-200 space-y-3">
+              <div className="flex items-center justify-between gap-1">
+                <div className="text-left flex-1 min-w-0">
+                  <span className="text-[10px] font-extrabold tracking-wider text-slate-400 uppercase block">
+                    {t.from}
+                  </span>
+                  <h2 className="text-[17px] font-black text-slate-900 leading-tight truncate">
+                    {fromCity}
+                  </h2>
+                  <p className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
+                    {fromTerminal}
+                  </p>
+                </div>
+
+                <div className="flex flex-col items-center justify-center px-1 min-w-[95px] flex-shrink-0">
+                  <div className="inline-flex items-center gap-1 bg-emerald-50 border border-emerald-100 text-[#00B14F] px-2 py-0.5 rounded-full text-[10.5px] font-bold mb-1 shadow-2xs">
+                    <span>💺</span>
+                    <span>
+                      {t.seat} {booking.seat || "3C"}
+                    </span>
+                  </div>
+                  <div className="w-full flex items-center justify-center gap-1 text-slate-300">
+                    <div className="h-[1.5px] bg-slate-200 flex-1 rounded-full" />
+                    <span className="text-[11px] font-bold text-[#00B14F]">
+                      →
+                    </span>
+                    <div className="h-[1.5px] bg-slate-200 flex-1 rounded-full" />
+                  </div>
+                  <span className="text-[9.5px] font-bold text-slate-400 mt-0.5">
+                    {booking.trip?.duration || "2h 00m"}
+                  </span>
+                </div>
+
+                <div className="text-right flex-1 min-w-0">
+                  <span className="text-[10px] font-extrabold tracking-wider text-slate-400 uppercase block">
+                    {t.to}
+                  </span>
+                  <h2 className="text-[17px] font-black text-slate-900 leading-tight truncate">
+                    {toCity}
+                  </h2>
+                  <p className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
+                    {toTerminal}
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 text-center flex flex-col items-center justify-center pb-3">
+                <span className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase">
+                  {isUsed ? "EXPIRED / USED TICKET CODE" : t.ticketCode}
+                </span>
+
+                <div className="flex items-center justify-center gap-2 mt-0.5">
+                  <span
+                    className={`text-[28px] font-black tracking-wider ${isUsed ? "text-slate-400 line-through" : "text-[#7C3AED]"}`}
+                  >
+                    {booking.shortCode}
+                  </span>
+                  <button
+                    onClick={copyShortCode}
+                    className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl active:scale-95 transition-transform"
+                  >
+                    {copied ? (
+                      <Check size={14} className="text-emerald-600" />
+                    ) : (
+                      <Copy size={14} />
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
 
-            {/* Clear QR Code Display Section */}
-            <div className="pt-2.5 border-t border-slate-100 flex flex-col items-center justify-center">
+            <div className="pt-4 pb-4 px-4 border-t border-slate-100 flex flex-col items-center justify-center bg-white">
               <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-2xs flex items-center justify-center">
                 <QRCodeCanvas
                   value={qrPayload}
@@ -811,187 +802,162 @@ export default function TicketDetailPage() {
                 {t.scanPrompt}
               </span>
             </div>
-          </div>
 
-          <div className="p-3.5 grid grid-cols-2 gap-2.5 border-b border-slate-100 bg-slate-50/40">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-full bg-emerald-50 text-[#00B14F] flex items-center justify-center flex-shrink-0">
-                <Clock size={15} />
-              </div>
-              <div>
-                <div className="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider">
-                  {t.departure}
+            <div className="p-3.5 grid grid-cols-2 gap-2.5 border-t border-b border-slate-100 bg-slate-50/40">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-emerald-50 text-[#00B14F] flex items-center justify-center flex-shrink-0">
+                  <Clock size={15} />
                 </div>
-                <div className="text-[12.5px] font-bold text-slate-900 leading-tight">
-                  {booking.trip?.departureTime || "22:00"}
+                <div>
+                  <div className="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider">
+                    {t.departure}
+                  </div>
+                  <div className="text-[12.5px] font-bold text-slate-900 leading-tight">
+                    {booking.trip?.departureTime || "22:00"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-emerald-50 text-[#00B14F] flex items-center justify-center flex-shrink-0">
+                  <Clock size={15} />
+                </div>
+                <div>
+                  <div className="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider">
+                    {t.arrival}
+                  </div>
+                  <div className="text-[12.5px] font-bold text-slate-900 leading-tight">
+                    {booking.trip?.arrivalTime || "00:00"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-emerald-50 text-[#00B14F] flex items-center justify-center flex-shrink-0">
+                  <Calendar size={15} />
+                </div>
+                <div>
+                  <div className="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider">
+                    {t.date}
+                  </div>
+                  <div className="text-[12.5px] font-bold text-slate-900 leading-tight">
+                    {booking.trip?.date || booking.bookingDate || "2026-08-14"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-emerald-50 text-[#00B14F] flex items-center justify-center flex-shrink-0">
+                  <Car size={15} />
+                </div>
+                <div>
+                  <div className="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider">
+                    {t.plateNo}
+                  </div>
+                  <div className="text-[12.5px] font-bold text-slate-900 leading-tight truncate max-w-[100px]">
+                    {plateNumber}
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-full bg-emerald-50 text-[#00B14F] flex items-center justify-center flex-shrink-0">
-                <Clock size={15} />
-              </div>
-              <div>
-                <div className="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider">
-                  {t.arrival}
-                </div>
-                <div className="text-[12.5px] font-bold text-slate-900 leading-tight">
-                  {booking.trip?.arrivalTime || "00:00"}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-full bg-emerald-50 text-[#00B14F] flex items-center justify-center flex-shrink-0">
-                <Calendar size={15} />
-              </div>
-              <div>
-                <div className="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider">
-                  {t.date}
-                </div>
-                <div className="text-[12.5px] font-bold text-slate-900 leading-tight">
-                  {booking.trip?.date || booking.bookingDate || "2026-08-14"}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-full bg-emerald-50 text-[#00B14F] flex items-center justify-center flex-shrink-0">
-                <Car size={15} />
-              </div>
-              <div>
-                <div className="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider">
-                  {t.plateNo}
-                </div>
-                <div className="text-[12.5px] font-bold text-slate-900 leading-tight truncate max-w-[100px]">
-                  {plateNumber}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Passenger Information & Editing Box */}
-          <div className="p-3.5 bg-slate-50/90 space-y-2 text-[12px]">
-            {/* Helper Notice Banner (Hidden on saved ticket & download) */}
-            {!isSavedName && (
-              <div className="bg-amber-50 border border-amber-200/80 p-2.5 rounded-xl text-[11px] text-amber-800 flex items-start gap-2">
-                <Info
-                  size={14}
-                  className="text-amber-600 flex-shrink-0 mt-0.5"
-                />
-                <span>
-                  You can change the passenger name below if you used another
-                  MoMo account or booked for someone else. Click{" "}
-                  <strong>Save</strong> when done.
+            <div className="p-4 bg-white space-y-2">
+              <div className="w-full flex items-center justify-between px-2">
+                <span className="text-[12px] text-slate-500 font-medium">
+                  {t.passenger}:
+                </span>
+                <span className="text-[13px] font-bold text-slate-900">
+                  {booking.passengerName || "You"}
                 </span>
               </div>
-            )}
 
-            {nameSavedSuccess && (
-              <div className="bg-emerald-50 border border-emerald-200 p-2 rounded-xl text-[11px] text-emerald-800 font-bold flex items-center gap-1.5">
-                <Check size={14} className="text-emerald-600" />
-                <span>Passenger name saved successfully!</span>
-              </div>
-            )}
+              {booking.momoAccountName && (
+                <div className="w-full pt-2 border-t border-slate-100 flex items-center justify-between px-2 text-[11.5px]">
+                  <span className="text-slate-400 font-medium">
+                    {t.momoAccount}:
+                  </span>
+                  <span className="font-semibold text-slate-700">
+                    {booking.momoAccountName}
+                  </span>
+                </div>
+              )}
 
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-slate-500 font-medium">{t.passenger}:</span>
-              <div className="flex items-center gap-1.5 flex-1 justify-end">
-                <input
-                  type="text"
-                  value={passengerNameInput}
-                  onChange={(e) => setPassengerNameInput(e.target.value)}
-                  placeholder="Enter passenger name"
-                  className="font-bold text-slate-900 bg-white border border-slate-200/90 rounded-lg px-2.5 py-1 text-right focus:outline-none focus:ring-2 focus:ring-[#00B14F] text-[12.5px] max-w-[170px]"
-                />
-                <button
-                  onClick={handleSavePassengerName}
-                  className="bg-[#00B14F] hover:bg-[#009643] text-white text-[11px] font-bold px-3 py-1 rounded-lg transition-colors flex items-center gap-1 active:scale-95 shadow-2xs"
-                >
-                  <Check size={12} />
-                  <span>Save</span>
-                </button>
-              </div>
-            </div>
-
-            {booking.momoAccountName && (
-              <div className="flex justify-between items-center text-[11.5px]">
-                <span className="text-slate-400 font-medium">
-                  {t.momoAccount}:
+              <div className="w-full pt-2 border-t border-slate-100 flex items-center justify-between px-2">
+                <span className="text-[12px] text-slate-500 font-medium">
+                  {t.totalPaid}:
                 </span>
-                <span className="font-semibold text-slate-700">
-                  {booking.momoAccountName}
+                <span className="text-[14px] font-black text-[#00B14F]">
+                  {booking.totalAmount?.toLocaleString() ||
+                    booking.trip?.price ||
+                    "5,000"}{" "}
+                  RWF
                 </span>
               </div>
-            )}
-
-            <div className="flex justify-between items-center pt-1.5 border-t border-slate-200/60">
-              <span className="text-slate-500 font-medium">{t.totalPaid}:</span>
-              <span className="font-black text-[#00B14F] text-[14px]">
-                {booking.totalAmount?.toLocaleString() ||
-                  booking.trip?.price ||
-                  "5,000"}{" "}
-                RWF
-              </span>
             </div>
           </div>
         </div>
+      )}
 
-        {/* Action Buttons Bar */}
-        <div className="bg-white rounded-2xl p-2 shadow-sm border border-slate-200/70 flex items-center gap-2">
-          <button
-            onClick={handleDownload}
-            disabled={isDownloading}
-            className="flex-1 flex items-center justify-center gap-2 bg-[#00B14F] hover:bg-[#009643] text-white font-bold text-[13px] py-2.5 rounded-xl transition-colors active:scale-[0.98] disabled:opacity-50 shadow-sm"
-          >
-            <Download size={15} />
-            <span>{isDownloading ? t.downloading : t.downloadTicket}</span>
-          </button>
-          <button
-            onClick={handleShare}
-            className="flex-1 flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[13px] py-2.5 rounded-xl transition-colors active:scale-[0.98]"
-          >
-            {shared ? (
-              <Check size={15} className="text-emerald-600" />
-            ) : (
-              <Share2 size={15} />
-            )}
-            <span>{shared ? t.linkCopied : t.shareTicket}</span>
-          </button>
-        </div>
-
-        {/* About Trip Info Box */}
-        <div className="bg-blue-50/70 border border-blue-100 rounded-2xl p-3.5 space-y-1">
-          <div className="flex items-center gap-1.5 text-blue-800 font-bold text-[13px]">
-            <Info size={15} className="text-blue-600" />
-            <span>{t.aboutTrip}</span>
+      {/* Action Buttons */}
+      {!isPending && (
+        <div className="max-w-md mx-auto px-3.5 mt-3">
+          <div className="bg-white rounded-2xl p-2 shadow-sm border border-slate-200/70 flex items-center gap-2">
+            <button
+              onClick={handleDownload}
+              disabled={isDownloading}
+              className="flex-1 flex items-center justify-center gap-2 bg-[#00B14F] hover:bg-[#009643] text-white font-bold text-[13px] py-2.5 rounded-xl transition-colors active:scale-[0.98] disabled:opacity-50 shadow-sm cursor-pointer"
+            >
+              <Download size={15} />
+              <span>{isDownloading ? t.downloading : t.downloadTicket}</span>
+            </button>
+            <button
+              onClick={handleShare}
+              className="flex-1 flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[13px] py-2.5 rounded-xl transition-colors active:scale-[0.98] cursor-pointer"
+            >
+              {shared ? (
+                <Check size={15} className="text-emerald-600" />
+              ) : (
+                <Share2 size={15} />
+              )}
+              <span>{shared ? t.linkCopied : t.shareTicket}</span>
+            </button>
           </div>
-          <p className="text-[11.5px] text-blue-700/90 leading-relaxed">
-            {t.tripDescription}
-          </p>
         </div>
+      )}
 
-        {/* Agency Support Box */}
+      {/* About & Support Info */}
+      <div className="max-w-md mx-auto px-3.5 mt-3 space-y-3">
+        {!isPending && (
+          <div className="bg-blue-50/70 border border-blue-100 rounded-2xl p-3.5 space-y-1">
+            <div className="flex items-center gap-1.5 text-blue-800 font-bold text-[13px]">
+              <Info size={15} className="text-blue-600" />
+              <span>{t.aboutTrip}</span>
+            </div>
+            <p className="text-[11.5px] text-blue-700/90 leading-relaxed">
+              {t.tripDescription}
+            </p>
+          </div>
+        )}
+
         <div className="bg-white rounded-2xl border border-slate-200/70 p-3.5 space-y-2.5 shadow-sm">
           <div>
             <div className="text-[13px] font-bold text-slate-900">
               {t.needHelp} {operatorName}?
             </div>
             <p className="text-[11.5px] text-slate-500 leading-tight mt-0.5">
-              {t.helpDesc}
+              {t.helpDesc(dynamicBranchPhone)}
             </p>
           </div>
           <div className="grid grid-cols-2 gap-2 pt-0.5">
             <button
               onClick={openWhatsApp}
-              className="flex items-center justify-center gap-1.5 bg-[#00B14F] text-white font-bold text-[12.5px] py-2 rounded-xl hover:bg-[#009643] active:scale-95 transition-all shadow-2xs"
+              className="flex items-center justify-center gap-1.5 bg-[#00B14F] text-white font-bold text-[12.5px] py-2 rounded-xl hover:bg-[#009643] active:scale-95 transition-all shadow-2xs cursor-pointer"
             >
               <MessageCircle size={15} /> {t.whatsapp}
             </button>
             <button
               onClick={callAgency}
-              className="flex items-center justify-center gap-1.5 bg-slate-900 text-white font-bold text-[12.5px] py-2 rounded-xl hover:bg-slate-800 active:scale-95 transition-all shadow-2xs"
+              className="flex items-center justify-center gap-1.5 bg-slate-900 text-white font-bold text-[12.5px] py-2 rounded-xl hover:bg-slate-800 active:scale-95 transition-all shadow-2xs cursor-pointer"
             >
               <Phone size={15} /> {t.callAgency}
             </button>

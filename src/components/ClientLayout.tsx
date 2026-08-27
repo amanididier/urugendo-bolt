@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { usePathname } from "next/navigation";
 import { BottomNav } from "@/components/BottomNav";
 import { CityPicker } from "@/components/CityPicker";
 
@@ -9,6 +10,17 @@ interface ClientLayoutProps {
 }
 
 export function ClientLayout({ children }: ClientLayoutProps) {
+  const pathname = usePathname();
+
+  // Hide global passenger nav for manager and login routes
+  const isNavHidden =
+    !pathname ||
+    pathname === "/" ||
+    pathname.startsWith("/splash") ||
+    pathname.startsWith("/user-login") ||
+    pathname.startsWith("/agency/agency-login") ||
+    pathname.startsWith("/manager");
+
   return (
     <div className="min-h-screen bg-[#0F0F0F] flex items-center justify-center p-0 md:p-6">
       {/* Phone Shell */}
@@ -19,11 +31,15 @@ export function ClientLayout({ children }: ClientLayoutProps) {
         </div>
 
         {/* Scrollable Screen Body */}
-        <main className="flex-1 overflow-y-auto relative pb-[68px]">
+        <main
+          className={`flex-1 overflow-y-auto relative ${
+            isNavHidden ? "pb-0" : "pb-[68px]"
+          }`}
+        >
           {children}
         </main>
 
-        {/* Global Nav & Pickers */}
+        {/* Global Passenger Nav & City Picker */}
         <BottomNav />
         <CityPicker />
       </div>

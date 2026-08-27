@@ -149,7 +149,7 @@ export default function AgencyReportsPage() {
 
   useEffect(() => {
     if (userRole !== "agent") {
-      router.push("/login");
+      router.push("/agency/agency-login");
     }
   }, [userRole, router]);
 

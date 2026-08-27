@@ -16,7 +16,8 @@ import {
   Armchair,
   FileSpreadsheet,
 } from "lucide-react";
-import type { AgencyBranch } from "@/lib/types";
+import { fetchTripsByDate, fetchAllBookings } from "@/lib/api";
+import type { AgencyBranch, Trip } from "@/lib/types";
 
 interface ManifestTrip {
   id: string;
@@ -30,56 +31,6 @@ interface ManifestTrip {
   status: string;
 }
 
-const INITIAL_INCOMING: ManifestTrip[] = [
-  {
-    id: "inc-1",
-    busPlate: "RAD 450B",
-    driverName: "Jean-Paul Habimana",
-    from: "Kigali Nyabugogo",
-    to: "Musanze",
-    time: "16:15",
-    capacity: 29,
-    urugendoPassengers: 18,
-    status: "In Transit",
-  },
-  {
-    id: "inc-2",
-    busPlate: "RAC 112D",
-    driverName: "Eric Ndayishimiye",
-    from: "Rubavu Station",
-    to: "Musanze",
-    time: "15:45",
-    capacity: 29,
-    urugendoPassengers: 22,
-    status: "In Transit",
-  },
-];
-
-const INITIAL_OUTGOING: ManifestTrip[] = [
-  {
-    id: "out-1",
-    busPlate: "RAC 405C",
-    driverName: "Kamali Patrick",
-    from: "Musanze",
-    to: "Rubavu",
-    time: "10:00 AM",
-    capacity: 29,
-    urugendoPassengers: 16,
-    status: "Departed",
-  },
-  {
-    id: "out-2",
-    busPlate: "RAD 882D",
-    driverName: "Mugisha Francois",
-    from: "Musanze",
-    to: "Kigali",
-    time: "11:30 AM",
-    capacity: 29,
-    urugendoPassengers: 21,
-    status: "Departed",
-  },
-];
-
 const BRANCHES: string[] = [
   "Musanze",
   "Kigali",
@@ -91,23 +42,51 @@ const BRANCHES: string[] = [
 const getBranchName = (branch: AgencyBranch | string): string =>
   typeof branch === "string" ? branch : branch?.name || "Musanze";
 
+const cleanStationName = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/branch|station/g, "")
+    .trim();
+
 export default function AgencyManifestPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<"incoming" | "outgoing">(
     "incoming",
   );
   const [stationBranch, setStationBranch] = useState<string>("Musanze");
-  const [emptySeats, setEmptySeats] = useState<Record<string, number>>({
-    "out-1": 3,
-    "out-2": 1,
-  });
+  const [trips, setTrips] = useState<Trip[]>([]);
+  const [bookings, setBookings] = useState<any[]>([]);
+  const [emptySeats, setEmptySeats] = useState<Record<string, number>>({});
   const [savedFeedback, setSavedFeedback] = useState<string | null>(null);
 
   useEffect(() => {
-    const savedBranch = localStorage.getItem("urugendo_branch");
-    if (savedBranch) {
-      setStationBranch(savedBranch);
+    const savedBranch = localStorage.getItem("urugendo_branch") || "Musanze";
+    setStationBranch(savedBranch);
+
+    const savedEmptySeats = localStorage.getItem("urugendo_empty_seats");
+    if (savedEmptySeats) {
+      try {
+        setEmptySeats(JSON.parse(savedEmptySeats));
+      } catch (e) {
+        console.error("Failed to parse saved empty seats", e);
+      }
     }
+
+    async function loadData() {
+      try {
+        const todayStr = new Date().toISOString().split("T")[0];
+        const [todayTrips, allBookings] = await Promise.all([
+          fetchTripsByDate(todayStr),
+          fetchAllBookings(),
+        ]);
+        setTrips(todayTrips || []);
+        setBookings(allBookings || []);
+      } catch (error) {
+        console.error("Failed to fetch manifest data:", error);
+      }
+    }
+
+    loadData();
   }, []);
 
   const handleBranchChange = (newBranch: string) => {
@@ -115,7 +94,46 @@ export default function AgencyManifestPage() {
     localStorage.setItem("urugendo_branch", newBranch);
   };
 
+  const currentStationKey = cleanStationName(stationBranch);
+
+  const stationIncoming: ManifestTrip[] = trips
+    .filter((t) => cleanStationName(t.to || "").includes(currentStationKey))
+    .map((t, idx) => ({
+      id: `inc-${t.id || idx}`,
+      busPlate: t.plateNumber || "RAC 112D",
+      driverName: t.driverName || "Station Driver",
+      from: t.from,
+      to: getBranchName(stationBranch),
+      time: t.arrivalTime || t.departureTime,
+      capacity: t.totalSeats || 29,
+      urugendoPassengers: bookings.filter(
+        (b) =>
+          (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id &&
+          b.status !== "cancelled",
+      ).length,
+      status: t.status || "In Transit",
+    }));
+
+  const stationOutgoing: ManifestTrip[] = trips
+    .filter((t) => cleanStationName(t.from || "").includes(currentStationKey))
+    .map((t, idx) => ({
+      id: `out-${t.id || idx}`,
+      busPlate: t.plateNumber || "RAD 882D",
+      driverName: t.driverName || "Station Driver",
+      from: getBranchName(stationBranch),
+      to: t.to,
+      time: t.departureTime,
+      capacity: t.totalSeats || 29,
+      urugendoPassengers: bookings.filter(
+        (b) =>
+          (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id &&
+          b.status !== "cancelled",
+      ).length,
+      status: t.status || "Scheduled",
+    }));
+
   const handleSaveEmptySeats = (tripId: string) => {
+    localStorage.setItem("urugendo_empty_seats", JSON.stringify(emptySeats));
     setSavedFeedback(tripId);
     setTimeout(() => setSavedFeedback(null), 2500);
   };
@@ -123,6 +141,7 @@ export default function AgencyManifestPage() {
   const exportStyledExcelReport = () => {
     const branchName = getBranchName(stationBranch);
     const isIncoming = activeTab === "incoming";
+    const activeList = isIncoming ? stationIncoming : stationOutgoing;
 
     const tableHeaders = isIncoming
       ? [
@@ -153,12 +172,13 @@ export default function AgencyManifestPage() {
         ];
 
     const tableRows = isIncoming
-      ? INITIAL_INCOMING.map((trip) => {
-          const paperTickets = Math.max(
-            0,
-            trip.capacity - trip.urugendoPassengers,
-          );
-          return `
+      ? activeList
+          .map((trip) => {
+            const paperTickets = Math.max(
+              0,
+              trip.capacity - trip.urugendoPassengers,
+            );
+            return `
             <tr>
               <td style="padding: 8px; text-align: center;"><span style="background-color: #DCFCE7; color: #15803D; padding: 4px 10px; border-radius: 12px; font-weight: bold; font-size: 11px; display: inline-block;">INCOMING</span></td>
               <td style="padding: 8px; font-weight: bold;">${trip.busPlate}</td>
@@ -171,15 +191,17 @@ export default function AgencyManifestPage() {
               <td style="padding: 8px; text-align: center;">${paperTickets}</td>
               <td style="padding: 8px; text-align: center;">${trip.status}</td>
             </tr>`;
-        }).join("")
-      : INITIAL_OUTGOING.map((trip) => {
-          const empty = emptySeats[trip.id] ?? 0;
-          const paperTickets = Math.max(
-            0,
-            trip.capacity - trip.urugendoPassengers - empty,
-          );
-          const totalOnboard = trip.urugendoPassengers + paperTickets;
-          return `
+          })
+          .join("")
+      : activeList
+          .map((trip) => {
+            const empty = emptySeats[trip.id] ?? 0;
+            const paperTickets = Math.max(
+              0,
+              trip.capacity - trip.urugendoPassengers - empty,
+            );
+            const totalOnboard = trip.urugendoPassengers + paperTickets;
+            return `
             <tr>
               <td style="padding: 8px; text-align: center;"><span style="background-color: #FEE2E2; color: #B91C1C; padding: 4px 10px; border-radius: 12px; font-weight: bold; font-size: 11px; display: inline-block;">OUTGOING</span></td>
               <td style="padding: 8px; font-weight: bold;">${trip.busPlate}</td>
@@ -194,7 +216,8 @@ export default function AgencyManifestPage() {
               <td style="padding: 8px; text-align: center; font-weight: bold;">${totalOnboard}/${trip.capacity}</td>
               <td style="padding: 8px; text-align: center;">${trip.status}</td>
             </tr>`;
-        }).join("");
+          })
+          .join("");
 
     const htmlContent = `
       <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
@@ -297,7 +320,7 @@ export default function AgencyManifestPage() {
               : "bg-slate-100 text-slate-600 hover:bg-slate-200"
           }`}
         >
-          <ArrowDownLeft size={16} /> Incoming Buses ({INITIAL_INCOMING.length})
+          <ArrowDownLeft size={16} /> Incoming Buses ({stationIncoming.length})
         </button>
 
         <button
@@ -309,14 +332,14 @@ export default function AgencyManifestPage() {
           }`}
         >
           <ArrowUpRight size={16} /> Outgoing / Departed (
-          {INITIAL_OUTGOING.length})
+          {stationOutgoing.length})
         </button>
       </div>
 
       {/* Manifest Content */}
       <div className="p-4 max-w-2xl mx-auto space-y-3">
         {activeTab === "incoming"
-          ? INITIAL_INCOMING.map((trip) => {
+          ? stationIncoming.map((trip) => {
               const paperTickets = Math.max(
                 0,
                 trip.capacity - trip.urugendoPassengers,
@@ -375,7 +398,7 @@ export default function AgencyManifestPage() {
                 </div>
               );
             })
-          : INITIAL_OUTGOING.map((trip) => {
+          : stationOutgoing.map((trip) => {
               const empty = emptySeats[trip.id] ?? 0;
               const paperTickets = Math.max(
                 0,
@@ -447,12 +470,18 @@ export default function AgencyManifestPage() {
                         min={0}
                         max={trip.capacity}
                         value={empty}
-                        onChange={(e) =>
-                          setEmptySeats({
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          const updated = {
                             ...emptySeats,
-                            [trip.id]: Number(e.target.value),
-                          })
-                        }
+                            [trip.id]: val,
+                          };
+                          setEmptySeats(updated);
+                          localStorage.setItem(
+                            "urugendo_empty_seats",
+                            JSON.stringify(updated),
+                          );
+                        }}
                         className="w-16 bg-white border border-slate-300 rounded-lg py-1 px-2 text-center font-bold text-xs text-slate-800 focus:ring-2 focus:ring-[#00B14F] focus:outline-hidden"
                       />
                       <button

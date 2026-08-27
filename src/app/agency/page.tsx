@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus,
   Clock,
@@ -12,7 +12,6 @@ import {
   DollarSign,
   Search,
   CheckCircle,
-  Bus,
   Save,
   Phone,
   User,
@@ -23,13 +22,18 @@ import {
   CheckCircle2,
   Armchair,
   Users,
+  ShieldCheck,
+  Bell,
+  ChevronRight,
 } from "lucide-react";
 import {
   fetchTripsByDate,
   fetchAllBookings,
+  fetchBookingById,
   updateBookingStatus,
   updateTripStatus,
 } from "@/lib/api";
+import { supabase } from "@/lib/supabaseClient"; // Added for Supabase real-time agent verification status checks
 import type { Trip, Booking, AgencyBranch } from "@/lib/types";
 
 export interface ExtendedBooking extends Omit<Partial<Booking>, "status"> {
@@ -70,58 +74,36 @@ interface ManifestTrip {
   status: string;
 }
 
-const INITIAL_INCOMING: ManifestTrip[] = [
-  {
-    id: "inc-1",
-    busPlate: "RAD 450B",
-    driverName: "Jean-Paul Habimana",
-    from: "Kigali Nyabugogo",
-    to: "Musanze",
-    time: "16:15",
-    capacity: 29,
-    urugendoPassengers: 18,
-    status: "In Transit",
-  },
-  {
-    id: "inc-2",
-    busPlate: "RAC 112D",
-    driverName: "Eric Ndayishimiye",
-    from: "Rubavu Station",
-    to: "Musanze",
-    time: "15:45",
-    capacity: 29,
-    urugendoPassengers: 22,
-    status: "In Transit",
-  },
-];
-
-const INITIAL_OUTGOING: ManifestTrip[] = [
-  {
-    id: "out-1",
-    busPlate: "RAC 405C",
-    driverName: "Kamali Patrick",
-    from: "Musanze",
-    to: "Rubavu",
-    time: "10:00 AM",
-    capacity: 29,
-    urugendoPassengers: 16,
-    status: "Departed",
-  },
-  {
-    id: "out-2",
-    busPlate: "RAD 882D",
-    driverName: "Mugisha Francois",
-    from: "Musanze",
-    to: "Kigali",
-    time: "11:30 AM",
-    capacity: 29,
-    urugendoPassengers: 21,
-    status: "Departed",
-  },
-];
-
 const getBranchName = (branch: AgencyBranch | string): string =>
   typeof branch === "string" ? branch : branch?.name || "Musanze";
+
+const cleanStationName = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/branch|station/g, "")
+    .trim();
+
+// Apple-style helper to save user notification into localStorage (Rule 3)
+const addUserNotification = (title: string, message: string) => {
+  try {
+    const existing = localStorage.getItem("urugendo_user_notifications");
+    const parsed = existing ? JSON.parse(existing) : [];
+    const newNotif = {
+      id: `notif-${Date.now()}`,
+      title,
+      message,
+      type: "booking",
+      read: false,
+      createdAt: new Date().toISOString(),
+    };
+    localStorage.setItem(
+      "urugendo_user_notifications",
+      JSON.stringify([newNotif, ...parsed]),
+    );
+  } catch {
+    // Ignore storage issues
+  }
+};
 
 export default function AgencyDashboard() {
   const router = useRouter();
@@ -142,20 +124,85 @@ export default function AgencyDashboard() {
   } | null>(null);
   const [verifying, setVerifying] = useState(false);
 
-  // Agency Session Context
   const [agentBranch, setAgentBranch] = useState("Musanze");
   const [, setOperatorId] = useState("");
 
-  const [emptySeats, setEmptySeats] = useState<Record<string, number>>({
-    "out-1": 3,
-    "out-2": 1,
-  });
+  const [emptySeats, setEmptySeats] = useState<Record<string, number>>({});
   const [savedFeedback, setSavedFeedback] = useState<string | null>(null);
+
+  // Added states for real-time agent verification status checks & Apple-designed pending modals
+  const [agentStatus, setAgentStatus] = useState<string>("approved");
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+
+  const unreadCount = 3;
+
+  // Added Supabase Real-Time Agent Approval Listener & Session Guard
+  useEffect(() => {
+    let channel: any = null;
+
+    async function checkAgentApprovalStatus() {
+      try {
+        const storedAgentEmail =
+          localStorage.getItem("urugendo_agent_email") ||
+          localStorage.getItem("urugendo_user_email");
+        if (!storedAgentEmail) return;
+
+        const { data, error } = await supabase
+          .from("agents")
+          .select("status, branch, id")
+          .eq("email", storedAgentEmail)
+          .single();
+
+        if (!error && data) {
+          setAgentStatus(data.status);
+          if (data.status === "pending") {
+            setShowApprovalModal(true);
+          } else {
+            setShowApprovalModal(false);
+          }
+        }
+
+        // Setup real-time subscription for instant manager approval feedback
+        channel = supabase
+          .channel(`agent-status-${storedAgentEmail}`)
+          .on(
+            "postgres_changes",
+            {
+              event: "UPDATE",
+              schema: "public",
+              table: "agents",
+              filter: `email=eq.${storedAgentEmail}`,
+            },
+            (payload: any) => {
+              const updated = payload.new;
+              if (updated && updated.status) {
+                setAgentStatus(updated.status);
+                if (updated.status === "approved") {
+                  setShowApprovalModal(false);
+                } else if (updated.status === "pending") {
+                  setShowApprovalModal(true);
+                }
+              }
+            },
+          )
+          .subscribe();
+      } catch (err) {
+        console.error("Error checking agent status:", err);
+      }
+    }
+
+    checkAgentApprovalStatus();
+
+    return () => {
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
 
-    // Load logged-in station details
     const branch = localStorage.getItem("urugendo_branch") || "Musanze";
     const opId = localStorage.getItem("urugendo_operator_id") || "";
     setAgentBranch(branch);
@@ -178,9 +225,32 @@ export default function AgencyDashboard() {
           fetchTripsByDate(todayStr),
           fetchAllBookings(),
         ]);
+
         if (isMounted) {
-          setTrips(todayTrips || []);
-          setBookings((allBookings as ExtendedBooking[]) || []);
+          const currentStation = cleanStationName(branch);
+
+          const branchTrips = (todayTrips || []).filter((t) => {
+            const fromStation = cleanStationName(t.from || "");
+            const toStation = cleanStationName(t.to || "");
+            return (
+              fromStation.includes(currentStation) ||
+              toStation.includes(currentStation)
+            );
+          });
+
+          const branchBookings = (
+            (allBookings as ExtendedBooking[]) || []
+          ).filter((b) => {
+            const tripObj =
+              b.trip && typeof b.trip === "object" ? b.trip : null;
+            const tripFrom = tripObj?.from
+              ? cleanStationName(tripObj.from)
+              : "";
+            return tripFrom.includes(currentStation) || !tripFrom;
+          });
+
+          setTrips(branchTrips);
+          setBookings(branchBookings);
         }
       } catch (error) {
         console.error("Failed to fetch agency dashboard data:", error);
@@ -196,6 +266,44 @@ export default function AgencyDashboard() {
     };
   }, []);
 
+  const currentStationKey = cleanStationName(agentBranch);
+
+  const stationIncoming: ManifestTrip[] = trips
+    .filter((t) => cleanStationName(t.to || "").includes(currentStationKey))
+    .map((t, idx) => ({
+      id: `inc-${t.id || idx}`,
+      busPlate: t.plateNumber || "RAC 112D",
+      driverName: t.driverName || "Station Driver",
+      from: t.from,
+      to: getBranchName(agentBranch),
+      time: t.arrivalTime || t.departureTime,
+      capacity: t.totalSeats || 29,
+      urugendoPassengers: bookings.filter(
+        (b) =>
+          (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id &&
+          b.status !== "cancelled",
+      ).length,
+      status: t.status || "In Transit",
+    }));
+
+  const stationOutgoing: ManifestTrip[] = trips
+    .filter((t) => cleanStationName(t.from || "").includes(currentStationKey))
+    .map((t, idx) => ({
+      id: `out-${t.id || idx}`,
+      busPlate: t.plateNumber || "RAD 882D",
+      driverName: t.driverName || "Station Driver",
+      from: getBranchName(agentBranch),
+      to: t.to,
+      time: t.departureTime,
+      capacity: t.totalSeats || 29,
+      urugendoPassengers: bookings.filter(
+        (b) =>
+          (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id &&
+          b.status !== "cancelled",
+      ).length,
+      status: t.status || "Scheduled",
+    }));
+
   const handleSaveEmptySeats = (tripId: string) => {
     localStorage.setItem("urugendo_empty_seats", JSON.stringify(emptySeats));
     setSavedFeedback(tripId);
@@ -205,6 +313,7 @@ export default function AgencyDashboard() {
   const exportStyledExcelReport = () => {
     const branchName = getBranchName(agentBranch);
     const isIncoming = manifestSubTab === "incoming";
+    const activeList = isIncoming ? stationIncoming : stationOutgoing;
 
     const tableHeaders = isIncoming
       ? [
@@ -235,90 +344,93 @@ export default function AgencyDashboard() {
         ];
 
     const tableRows = isIncoming
-      ? INITIAL_INCOMING.map((trip) => {
-          const paperTickets = Math.max(
-            0,
-            trip.capacity - trip.urugendoPassengers,
-          );
-          return `
-            <tr>
-              <td style="padding: 8px; text-align: center;"><span style="background-color: #DCFCE7; color: #15803D; padding: 4px 10px; border-radius: 12px; font-weight: bold; font-size: 11px; display: inline-block;">INCOMING</span></td>
-              <td style="padding: 8px; font-weight: bold;">${trip.busPlate}</td>
-              <td style="padding: 8px;">${trip.driverName}</td>
-              <td style="padding: 8px;">${trip.from}</td>
-              <td style="padding: 8px;">${branchName}</td>
-              <td style="padding: 8px; font-weight: bold; color: #047857;">${trip.time}</td>
-              <td style="padding: 8px; text-align: center;">${trip.capacity}</td>
-              <td style="padding: 8px; text-align: center; font-weight: bold; color: #00B14F;">${trip.urugendoPassengers}</td>
-              <td style="padding: 8px; text-align: center;">${paperTickets}</td>
-              <td style="padding: 8px; text-align: center;">${trip.status}</td>
-            </tr>`;
-        }).join("")
-      : INITIAL_OUTGOING.map((trip) => {
-          const empty = emptySeats[trip.id] ?? 0;
-          const paperTickets = Math.max(
-            0,
-            trip.capacity - trip.urugendoPassengers - empty,
-          );
-          const totalOnboard = trip.urugendoPassengers + paperTickets;
-          return `
-            <tr>
-              <td style="padding: 8px; text-align: center;"><span style="background-color: #FEE2E2; color: #B91C1C; padding: 4px 10px; border-radius: 12px; font-weight: bold; font-size: 11px; display: inline-block;">OUTGOING</span></td>
-              <td style="padding: 8px; font-weight: bold;">${trip.busPlate}</td>
-              <td style="padding: 8px;">${trip.driverName}</td>
-              <td style="padding: 8px;">${branchName}</td>
-              <td style="padding: 8px;">${trip.to}</td>
-              <td style="padding: 8px; font-weight: bold; color: #1E293B;">${trip.time}</td>
-              <td style="padding: 8px; text-align: center;">${trip.capacity}</td>
-              <td style="padding: 8px; text-align: center; font-weight: bold; color: #00B14F;">${trip.urugendoPassengers}</td>
-              <td style="padding: 8px; text-align: center; color: #D97706; font-weight: bold;">${empty}</td>
-              <td style="padding: 8px; text-align: center;">${paperTickets}</td>
-              <td style="padding: 8px; text-align: center; font-weight: bold;">${totalOnboard}/${trip.capacity}</td>
-              <td style="padding: 8px; text-align: center;">${trip.status}</td>
-            </tr>`;
-        }).join("");
+      ? activeList
+          .map((trip, idx) => {
+            const paperTickets = Math.max(
+              0,
+              trip.capacity - trip.urugendoPassengers,
+            );
+            const bg = idx % 2 === 0 ? "#FFFFFF" : "#F8FAFC";
+            return `
+            <Row ss:Height="22" style="background-color: ${bg}; font-size: 11px;">
+              <Cell style="background-color: #ECFDF5; color: #059669; font-weight: bold; text-align: center;"><Data ss:Type="String">INCOMING</Data></Cell>
+              <Cell style="font-weight: bold;"><Data ss:Type="String">${trip.busPlate}</Data></Cell>
+              <Cell><Data ss:Type="String">${trip.driverName}</Data></Cell>
+              <Cell><Data ss:Type="String">${trip.from}</Data></Cell>
+              <Cell><Data ss:Type="String">${branchName}</Data></Cell>
+              <Cell style="font-weight: bold; color: #00B14F;"><Data ss:Type="String">${trip.time}</Data></Cell>
+              <Cell style="text-align: center;"><Data ss:Type="Number">${trip.capacity}</Data></Cell>
+              <Cell style="text-align: center; font-weight: bold; color: #00B14F;"><Data ss:Type="Number">${trip.urugendoPassengers}</Data></Cell>
+              <Cell style="text-align: center;"><Data ss:Type="Number">${paperTickets}</Data></Cell>
+              <Cell style="text-align: center;"><Data ss:Type="String">${trip.status}</Data></Cell>
+            </Row>`;
+          })
+          .join("")
+      : activeList
+          .map((trip, idx) => {
+            const empty = emptySeats[trip.id] ?? 0;
+            const paperTickets = Math.max(
+              0,
+              trip.capacity - trip.urugendoPassengers - empty,
+            );
+            const totalOnboard = trip.urugendoPassengers + paperTickets;
+            const bg = idx % 2 === 0 ? "#FFFFFF" : "#F8FAFC";
+            return `
+            <Row ss:Height="22" style="background-color: ${bg}; font-size: 11px;">
+              <Cell style="background-color: #FEF2F2; color: #DC2626; font-weight: bold; text-align: center;"><Data ss:Type="String">DEPARTED</Data></Cell>
+              <Cell style="font-weight: bold;"><Data ss:Type="String">${trip.busPlate}</Data></Cell>
+              <Cell><Data ss:Type="String">${trip.driverName}</Data></Cell>
+              <Cell><Data ss:Type="String">${branchName}</Data></Cell>
+              <Cell><Data ss:Type="String">${trip.to}</Data></Cell>
+              <Cell style="font-weight: bold;"><Data ss:Type="String">${trip.time}</Data></Cell>
+              <Cell style="text-align: center;"><Data ss:Type="Number">${trip.capacity}</Data></Cell>
+              <Cell style="text-align: center; font-weight: bold; color: #00B14F;"><Data ss:Type="Number">${trip.urugendoPassengers}</Data></Cell>
+              <Cell style="text-align: center; color: #D97706; font-weight: bold;"><Data ss:Type="Number">${empty}</Data></Cell>
+              <Cell style="text-align: center;"><Data ss:Type="Number">${paperTickets}</Data></Cell>
+              <Cell style="text-align: center; font-weight: bold;"><Data ss:Type="String">${totalOnboard}/${trip.capacity}</Data></Cell>
+              <Cell style="text-align: center;"><Data ss:Type="String">${trip.status}</Data></Cell>
+            </Row>`;
+          })
+          .join("");
 
-    const htmlContent = `
-      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="utf-8" />
-        <!--[if gte mso 9]>
-        <xml>
-          <x:ExcelWorkbook>
-            <x:ExcelWorksheets>
-              <x:ExcelWorksheet>
-                <x:Name>Manifest Report</x:Name>
-                <x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
-              </x:ExcelWorksheet>
-            </x:ExcelWorksheets>
-          </x:ExcelWorkbook>
-        </xml>
-        <![endif]-->
-      </head>
-      <body style="font-family: Arial, sans-serif; font-size: 12px;">
-        <h2 style="color: #0F172A; margin-bottom: 4px;">Station Manifest Report (${branchName} Branch)</h2>
-        <p style="color: #64748B; font-size: 11px; margin-top: 0;">Mode: <b>${manifestSubTab.toUpperCase()}</b> | Generated: ${new Date().toLocaleString()}</p>
-        <table border="1" cellpadding="0" cellspacing="0" style="border-collapse: collapse; border: 1px solid #E2E8F0; width: 100%;">
-          <thead>
-            <tr style="background-color: #0F172A; color: #FFFFFF; font-weight: bold; text-align: left;">
+    const xmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+      <?mso-application progid="Excel.Sheet"?>
+      <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+        xmlns:o="urn:schemas-microsoft-com:office:office"
+        xmlns:x="urn:schemas-microsoft-com:office:excel"
+        xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+        xmlns:html="http://www.w3.org/TR/REC-html40">
+        <Styles>
+          <Style ss:ID="Header">
+            <Font ss:FontName="Segoe UI" ss:Size="11" ss:Color="#FFFFFF" ss:Bold="1"/>
+            <Interior ss:Color="#00B14F" ss:Pattern="Solid"/>
+            <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+          </Style>
+        </Styles>
+        <Worksheet ss:Name="Manifest Report">
+          <Table ss:ExpandedColumnCount="${tableHeaders.length}" ss:FullColumns="1" ss:FullRows="1" ss:DefaultColumnWidth="110" ss:DefaultRowHeight="20">
+            <Row ss:Height="26">
+              <Cell ss:StyleID="Header" ss:MergeAcross="${tableHeaders.length - 1}">
+                <Data ss:Type="String">URUGENDO EXPRESS — STATION MANIFEST (${manifestSubTab.toUpperCase()})</Data>
+              </Cell>
+            </Row>
+            <Row ss:Height="18">
+              <Cell><Data ss:Type="String">Branch: ${branchName} | Generated: ${new Date().toLocaleString()}</Data></Cell>
+            </Row>
+            <Row ss:Height="24">
               ${tableHeaders
                 .map(
                   (header) =>
-                    `<th style="padding: 10px; border: 1px solid #334155;">${header}</th>`,
+                    `<Cell ss:StyleID="Header"><Data ss:Type="String">${header}</Data></Cell>`,
                 )
                 .join("")}
-            </tr>
-          </thead>
-          <tbody>
+            </Row>
             ${tableRows}
-          </tbody>
-        </table>
-      </body>
-      </html>`;
+          </Table>
+        </Worksheet>
+      </Workbook>`;
 
-    const blob = new Blob([htmlContent], {
-      type: "application/vnd.ms-excel;charset=utf-8;",
-    });
+    const blob = new Blob([xmlContent], { type: "application/vnd.ms-excel" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -361,36 +473,68 @@ export default function AgencyDashboard() {
     });
 
   const activeBookings = bookings.filter((b) => b.status !== "cancelled");
-  const todayRevenue = activeBookings.reduce(
-    (sum, b) => sum + (b.totalAmount || 0),
-    0,
-  );
+  const todayRevenue = activeBookings.reduce((sum, b) => {
+    const isConfirmedOrBoarded =
+      b.status === "confirmed" || b.status === "boarded";
+    if (!isConfirmedOrBoarded) return sum;
+    const tripObj = b.trip && typeof b.trip === "object" ? b.trip : null;
+    const tripFrom = tripObj?.from
+      ? cleanStationName(tripObj.from)
+      : currentStationKey;
+    if (tripFrom.includes(currentStationKey)) {
+      return sum + (b.totalAmount || tripObj?.price || 0);
+    }
+    return sum;
+  }, 0);
 
   const stats = {
     todayBookings: activeBookings.length,
     todayRevenue,
-    totalBuses:
-      new Set(trips.map((t) => t.plateNumber || t.id).filter(Boolean)).size ||
-      12,
-    activeRoutes: new Set(trips.map((t) => `${t.from}-${t.to}`)).size || 5,
+    totalBuses: new Set(trips.map((t) => t.plateNumber || t.id).filter(Boolean))
+      .size,
+    activeRoutes: new Set(
+      trips.map(
+        (t) =>
+          `${cleanStationName(t.from || "")}-${cleanStationName(t.to || "")}`,
+      ),
+    ).size,
   };
 
-  const handleVerifySearch = () => {
+  const handleVerifySearch = async () => {
     if (!searchSeat.trim()) {
       setVerifyResult(null);
       return;
     }
+    setVerifying(true);
     const query = searchSeat.toUpperCase().trim();
-    const found = bookings.find((b) => {
+
+    let found = bookings.find((b) => {
       return (
         b.seatNumber?.toUpperCase() === query ||
+        (b.seat && String(b.seat).toUpperCase() === query) ||
         b.id.toUpperCase().includes(query) ||
         b.passengerName?.toUpperCase().includes(query) ||
         b.shortCode?.toUpperCase() === query
       );
     });
 
+    if (!found) {
+      const remoteBooking = await fetchBookingById(query);
+      if (remoteBooking) {
+        const tripFrom = remoteBooking.trip?.from
+          ? cleanStationName(remoteBooking.trip.from)
+          : "";
+        if (tripFrom.includes(currentStationKey) || !tripFrom) {
+          found = {
+            ...remoteBooking,
+            seatNumber: remoteBooking.seat,
+          };
+        }
+      }
+    }
+
     setVerifyResult({ found: !!found, booking: found });
+    setVerifying(false);
   };
 
   const handleConfirmMoMoPayment = async (bookingId: string) => {
@@ -401,6 +545,11 @@ export default function AgencyDashboard() {
         prev.map((b) =>
           b.id === bookingId ? { ...b, status: "confirmed" } : b,
         ),
+      );
+      // Trigger notification according to Rule 3 copy specification
+      addUserNotification(
+        "Ticket Verified!",
+        "Your ticket from Musanze to Kigali (08:30 AM) has been received and verified! You may check it in your tickets page.",
       );
     }
     setVerifying(false);
@@ -413,6 +562,23 @@ export default function AgencyDashboard() {
       setBookings((prev) =>
         prev.map((b) => (b.id === bookingId ? { ...b, status: "boarded" } : b)),
       );
+      if (verifyResult?.booking?.id === bookingId) {
+        setVerifyResult((prev) =>
+          prev
+            ? {
+                ...prev,
+                booking: prev.booking
+                  ? { ...prev.booking, status: "boarded" }
+                  : undefined,
+              }
+            : null,
+        );
+      }
+      // Trigger notification for verified ticket
+      addUserNotification(
+        "Ticket Verified!",
+        "Your ticket from Musanze to Kigali (08:30 AM) has been received and verified! You may check it in your tickets page.",
+      );
     }
     setVerifying(false);
   };
@@ -420,10 +586,29 @@ export default function AgencyDashboard() {
   const handleMarkDelayed = async (tripId: string) => {
     const success = await updateTripStatus(tripId, "delayed" as any);
     if (success) {
+      const targetTrip = trips.find((t) => t.id === tripId);
+      const destination = targetTrip?.to || "Rubavu";
       setTrips((prev) =>
         prev.map((t) =>
           t.id === tripId ? { ...t, status: "delayed" as Trip["status"] } : t,
         ),
+      );
+      // Broadcast notification to passengers booked on this specific trip
+      const tripBookings = bookings.filter((b) => {
+        const bTripId = typeof b.trip === "string" ? b.trip : b.trip?.id;
+        return bTripId === tripId && b.status !== "cancelled";
+      });
+      tripBookings.forEach(() => {
+        addUserNotification(
+          "Trip Alert",
+          `⚠️ Trip Alert: Your trip to ${destination} has been delayed for 15 minutes due to heavy rainfall on the road. We appreciate your patience!`,
+        );
+      });
+      // Also dispatch a custom event for global background listeners
+      window.dispatchEvent(
+        new CustomEvent("urugendo-trip-delayed", {
+          detail: { tripId, destination },
+        }),
       );
     }
   };
@@ -448,26 +633,79 @@ export default function AgencyDashboard() {
   if (loading) {
     return (
       <div className="bg-surface-secondary pb-[88px] min-h-screen flex items-center justify-center">
-        <div className="text-text-muted text-[14px]">Loading dashboard...</div>
+        <div className="text-text-muted text-[14px]">
+          Loading station dashboard...
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-surface-secondary pb-[88px] min-h-screen font-sans">
+    <div className="bg-surface-secondary pb-[88px] min-h-screen font-sans relative">
+      {/* Apple-designed Glassmorphism Pending Status Guard Modal */}
+      <AnimatePresence>
+        {agentStatus === "pending" && showApprovalModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/40 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-white/90 backdrop-blur-xl border border-white/40 shadow-2xl rounded-3xl p-6 max-w-sm w-full text-center space-y-4"
+            >
+              <div className="w-16 h-16 bg-emerald-500/10 text-emerald-600 rounded-full flex items-center justify-center mx-auto animate-pulse">
+                <Clock size={32} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-bold text-slate-900">
+                  Approval Pending
+                </h3>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Your account has been submitted to the agency management. Wait
+                  for approval. You may exit the app; we&apos;ll notify you when
+                  you&apos;re approved.
+                </p>
+              </div>
+              <div className="pt-2 flex flex-col gap-2">
+                <button
+                  onClick={() => router.push("/")}
+                  className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 rounded-xl text-xs transition-all cursor-pointer"
+                >
+                  Exit to Home
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <div className="bg-primary pt-[60px] px-5 pb-5 rounded-b-[28px] print:hidden">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-2xl">
-            🚌
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-2xl">
+              🚌
+            </div>
+            <div>
+              <h1 className="text-[20px] font-extrabold text-white">
+                Agency Dashboard
+              </h1>
+              <p className="text-[12px] text-white/80 font-medium">
+                Virunga Express • {agentBranch}
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-[20px] font-extrabold text-white">
-              Agency Dashboard
-            </h1>
-            <p className="text-[12px] text-white/80 font-medium">
-              Virunga Express • {agentBranch} Station
-            </p>
-          </div>
+
+          <button
+            onClick={() => router.push("/agency/agency-notifications")}
+            className="w-10 h-10 rounded-full bg-white/15 flex items-center justify-center relative ring-1 ring-white/20 active:scale-90 transition-transform cursor-pointer"
+            aria-label="Agency Notifications"
+          >
+            <Bell size={20} className="text-white" />
+            {unreadCount > 0 && (
+              <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-accent text-white text-[9px] font-extrabold flex items-center justify-center border-2 border-primary">
+                {unreadCount}
+              </span>
+            )}
+          </button>
         </div>
 
         <div className="grid grid-cols-4 gap-2 mt-4">
@@ -527,7 +765,7 @@ export default function AgencyDashboard() {
           <div className="bg-gradient-to-r from-emerald-600 to-primary rounded-2xl p-4 text-white shadow-sm">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[12px] text-white/80 font-medium">
-                Today&apos;s Revenue
+                Today&apos;s Revenue ({agentBranch})
               </span>
               <DollarSign size={18} className="text-white/80" />
             </div>
@@ -536,7 +774,7 @@ export default function AgencyDashboard() {
             </div>
             <div className="flex items-center gap-2 mt-2 text-[11px] text-white/90">
               <TrendingUp size={14} />
-              <span>{stats.todayBookings} confirmed bookings today</span>
+              <span>{stats.todayBookings} station bookings today</span>
             </div>
           </div>
 
@@ -602,12 +840,12 @@ export default function AgencyDashboard() {
             className="w-full bg-primary text-white rounded-xl py-3 flex items-center justify-center gap-2 font-bold mb-4 shadow-sm active:scale-[0.98] transition-transform cursor-pointer"
           >
             <Plus size={18} />
-            Add New Departure
+            Add New Departure from {agentBranch}
           </button>
 
           {trips.length === 0 ? (
             <div className="text-center py-8 text-text-muted text-[13px]">
-              No trips scheduled for today
+              No departures scheduled for {agentBranch} today
             </div>
           ) : (
             <div className="space-y-3">
@@ -625,7 +863,10 @@ export default function AgencyDashboard() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: i * 0.05 }}
-                    className="bg-white rounded-xl border border-border overflow-hidden shadow-sm"
+                    onClick={() =>
+                      router.push(`/agency/schedules?tripId=${trip.id}`)
+                    }
+                    className="bg-white rounded-xl border border-border overflow-hidden shadow-sm hover:border-primary cursor-pointer transition-all"
                   >
                     <div className="px-4 py-2 bg-surface-secondary flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -637,13 +878,16 @@ export default function AgencyDashboard() {
                           → {trip.arrivalTime || "Calc"}
                         </span>
                       </div>
-                      <span
-                        className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${getStatusColor(
-                          trip.status || "scheduled",
-                        )}`}
-                      >
-                        {(trip.status || "SCHEDULED").toUpperCase()}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${getStatusColor(
+                            trip.status || "scheduled",
+                          )}`}
+                        >
+                          {(trip.status || "SCHEDULED").toUpperCase()}
+                        </span>
+                        <ChevronRight size={14} className="text-text-muted" />
+                      </div>
                     </div>
 
                     <div className="p-3">
@@ -656,6 +900,16 @@ export default function AgencyDashboard() {
                         </div>
                         <span className="text-[10px] font-medium text-text-muted bg-gray-100 px-2 py-0.5 rounded">
                           {trip.plateNumber || "RAC 302 C"}
+                        </span>
+                      </div>
+
+                      <div className="mb-2 bg-emerald-50/70 border border-emerald-100 rounded-lg p-2 text-[11px] flex items-center justify-between">
+                        <span className="font-bold text-emerald-800 flex items-center gap-1.5">
+                          <Users size={13} className="text-emerald-600" />
+                          Urugendo Passengers:
+                        </span>
+                        <span className="font-extrabold text-emerald-700 bg-white px-2 py-0.5 rounded-md shadow-2xs">
+                          {bookedCount} subscribed
                         </span>
                       </div>
 
@@ -693,7 +947,10 @@ export default function AgencyDashboard() {
                         <div className="flex items-center gap-2">
                           {trip.status !== "delayed" && (
                             <button
-                              onClick={() => handleMarkDelayed(trip.id)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMarkDelayed(trip.id);
+                              }}
                               className="text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded-md hover:bg-orange-100 cursor-pointer"
                             >
                               Mark Delayed
@@ -720,10 +977,14 @@ export default function AgencyDashboard() {
 
       {activeTab === "verify" && (
         <div className="px-4 mt-4 space-y-4">
-          <div className="bg-white rounded-xl border border-border p-3.5 shadow-sm">
-            <h3 className="text-[13px] font-bold text-text-primary mb-2">
-              Lookup Ticket or Seat
-            </h3>
+          <div className="bg-white rounded-2xl border border-border p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-3">
+              <ShieldCheck className="text-primary" size={20} />
+              <h3 className="text-[14px] font-bold text-text-primary">
+                Ticket Verification ({agentBranch})
+              </h3>
+            </div>
+
             <div className="flex gap-2">
               <div className="flex-1 relative">
                 <Search
@@ -735,15 +996,16 @@ export default function AgencyDashboard() {
                   value={searchSeat}
                   onChange={(e) => setSearchSeat(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleVerifySearch()}
-                  placeholder="Enter Seat Number, Ticket Code, or Name"
-                  className="w-full pl-9 pr-3 py-2 border border-border rounded-xl text-[13px] focus:outline-none focus:ring-1 focus:ring-primary"
+                  placeholder="Enter Ticket Code, Seat No, or Name"
+                  className="w-full pl-9 pr-3 py-2.5 border border-border rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                 />
               </div>
               <button
                 onClick={handleVerifySearch}
-                className="bg-primary text-white px-4 rounded-xl font-bold text-[12px] shadow-sm active:scale-95 transition-transform cursor-pointer"
+                disabled={verifying}
+                className="bg-primary text-white px-4 rounded-xl font-bold text-[12px] shadow-sm active:scale-95 transition-transform flex items-center gap-1 cursor-pointer"
               >
-                Search
+                {verifying ? "Searching..." : "Verify"}
               </button>
             </div>
 
@@ -751,59 +1013,97 @@ export default function AgencyDashboard() {
               <motion.div
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                className={`mt-3 p-3 rounded-xl border ${
+                className={`mt-4 p-4 rounded-xl border ${
                   verifyResult.found
                     ? verifyResult.booking?.status === "boarded"
-                      ? "bg-gray-100 border-gray-300 text-gray-500"
-                      : "bg-green-50 border-green-200"
+                      ? "bg-gray-100 border-gray-300 text-gray-600"
+                      : "bg-emerald-50 border-emerald-200"
                     : "bg-red-50 border-red-200 text-red-700"
                 }`}
               >
                 {verifyResult.found && verifyResult.booking ? (
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-extrabold text-[14px]">
-                          {verifyResult.booking.passengerName}
-                        </span>
-                        <span
-                          className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold ${
-                            verifyResult.booking.status === "boarded"
-                              ? "bg-gray-200 text-gray-600 line-through"
-                              : "bg-amber-100 text-amber-800"
-                          }`}
-                        >
-                          {verifyResult.booking.shortCode ||
-                            verifyResult.booking.id
-                              .substring(0, 6)
-                              .toUpperCase()}
-                        </span>
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between border-b border-gray-200/60 pb-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold text-[15px] text-text-primary">
+                            {verifyResult.booking.passengerName}
+                          </span>
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-md font-mono font-bold ${
+                              verifyResult.booking.status === "boarded"
+                                ? "bg-gray-200 text-gray-600 line-through"
+                                : "bg-emerald-100 text-emerald-800"
+                            }`}
+                          >
+                            {verifyResult.booking.shortCode ||
+                              verifyResult.booking.id
+                                .substring(0, 6)
+                                .toUpperCase()}
+                          </span>
+                        </div>
+                        <p className="text-[12px] text-text-muted mt-0.5">
+                          Phone: {verifyResult.booking.passengerPhone || "N/A"}
+                        </p>
                       </div>
-                      <div className="text-[11px] text-text-muted mt-0.5">
-                        Seat: {verifyResult.booking.seatNumber || "N/A"} •
-                        Amount:{" "}
-                        {verifyResult.booking.totalAmount?.toLocaleString()} RWF
+
+                      <div className="text-right">
+                        <span className="text-[10px] uppercase tracking-wider text-text-muted font-bold block">
+                          Seat Number
+                        </span>
+                        <span className="text-[18px] font-extrabold text-primary">
+                          {verifyResult.booking.seatNumber ||
+                            verifyResult.booking.seat ||
+                            "N/A"}
+                        </span>
                       </div>
                     </div>
-                    {verifyResult.booking.status === "boarded" ? (
-                      <span className="text-[11px] font-bold text-gray-500 bg-gray-200 px-3 py-1 rounded-full">
-                        EXPIRED / USED
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() =>
-                          handleMarkAsBoardedUsed(verifyResult.booking!.id)
-                        }
-                        disabled={verifying}
-                        className="bg-primary text-white text-[11px] font-bold px-3 py-1.5 rounded-full shadow-sm hover:bg-primary-dark cursor-pointer"
-                      >
-                        Verify & Board
-                      </button>
-                    )}
+
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div>
+                        <span className="text-text-muted block text-[10px]">
+                          Route / Trip
+                        </span>
+                        <span className="font-semibold text-text-primary">
+                          {verifyResult.booking.trip?.from || "Origin"} →{" "}
+                          {verifyResult.booking.trip?.to || "Destination"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-text-muted block text-[10px]">
+                          Fare Paid
+                        </span>
+                        <span className="font-bold text-emerald-700">
+                          {verifyResult.booking.totalAmount?.toLocaleString() ||
+                            verifyResult.booking.trip?.price?.toLocaleString() ||
+                            "2,500"}{" "}
+                          RWF
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 flex items-center justify-end">
+                      {verifyResult.booking.status === "boarded" ? (
+                        <span className="text-[11px] font-bold text-gray-500 bg-gray-200 px-3 py-1.5 rounded-full uppercase">
+                          EXPIRED / ALREADY BOARDED
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() =>
+                            handleMarkAsBoardedUsed(verifyResult.booking!.id)
+                          }
+                          disabled={verifying}
+                          className="bg-primary hover:bg-primary/90 text-white text-[12px] font-extrabold px-4 py-2 rounded-xl shadow-sm cursor-pointer transition-colors"
+                        >
+                          Verify
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ) : (
-                  <div className="text-[12px] font-medium text-center">
-                    No matching booking found for &quot;{searchSeat}&quot;
+                  <div className="text-[12px] font-medium text-center py-2">
+                    No matching booking found at {agentBranch} for &quot;
+                    {searchSeat}&quot;
                   </div>
                 )}
               </motion.div>
@@ -816,14 +1116,11 @@ export default function AgencyDashboard() {
                 <AlertCircle size={16} className="text-amber-500" />
                 Submitted MoMo Payments ({pendingMoMoPayments.length})
               </h3>
-              <span className="text-[10px] text-text-muted">
-                Instant Receiver
-              </span>
             </div>
 
             {pendingMoMoPayments.length === 0 ? (
               <div className="bg-white rounded-xl border border-border p-6 text-center text-text-muted text-[12px]">
-                No pending MoMo payment confirmations at the moment.
+                No pending MoMo payment confirmations at {agentBranch}.
               </div>
             ) : (
               <div className="space-y-3">
@@ -886,90 +1183,11 @@ export default function AgencyDashboard() {
                         className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[12px] px-4 py-1.5 rounded-lg shadow-sm flex items-center gap-1 active:scale-95 transition-transform cursor-pointer"
                       >
                         <CheckCircle size={14} />
-                        Confirm Payment
+                        confirm
                       </button>
                     </div>
                   </motion.div>
                 ))}
-              </div>
-            )}
-          </div>
-
-          <div className="bg-white rounded-xl border border-border p-4 shadow-sm">
-            <h3 className="text-[13px] font-bold text-text-primary mb-3">
-              Today&apos;s Verified & Boarded Tickets ({bookings.length})
-            </h3>
-            {bookings.length === 0 ? (
-              <div className="text-center py-4 text-text-muted text-[12px]">
-                No verified tickets yet
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {bookings.map((b) => {
-                  const isBoardedUsed = b.status === "boarded";
-                  const code =
-                    b.shortCode || b.id.substring(0, 6).toUpperCase();
-
-                  return (
-                    <div
-                      key={b.id}
-                      className={`flex items-center justify-between p-2.5 rounded-lg border transition-all ${
-                        isBoardedUsed
-                          ? "bg-gray-100/80 border-gray-200 text-gray-500"
-                          : "bg-surface-secondary border-border text-text-primary"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div
-                          className={`w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-bold shrink-0 ${
-                            isBoardedUsed
-                              ? "bg-gray-200 text-gray-500 line-through"
-                              : "bg-primary/10 text-primary"
-                          }`}
-                        >
-                          {b.seatNumber || "A1"}
-                        </div>
-                        <div className="truncate">
-                          <div
-                            className={`text-[12px] font-semibold truncate ${
-                              isBoardedUsed ? "line-through text-gray-500" : ""
-                            }`}
-                          >
-                            {b.passengerName}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${
-                                isBoardedUsed
-                                  ? "bg-gray-200 text-gray-500 line-through decoration-red-500"
-                                  : "bg-primary/10 text-primary font-bold"
-                              }`}
-                            >
-                              {code}
-                            </span>
-                            <span className="text-[10px] text-text-muted">
-                              {b.totalAmount?.toLocaleString()} RWF
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {isBoardedUsed ? (
-                        <span className="text-[10px] font-extrabold text-gray-400 bg-gray-200 px-2.5 py-1 rounded-full uppercase tracking-wider">
-                          EXPIRED
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => handleMarkAsBoardedUsed(b.id)}
-                          disabled={verifying}
-                          className="text-[11px] font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full hover:bg-primary/20 cursor-pointer"
-                        >
-                          Mark Boarded
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
               </div>
             )}
           </div>
@@ -978,35 +1196,67 @@ export default function AgencyDashboard() {
 
       {activeTab === "manifest" && (
         <div className="px-4 mt-4 space-y-3">
-          {/* Manifest Sub-navigation Tabs */}
-          <div className="bg-slate-200/80 p-1 rounded-xl flex gap-1">
+          <div className="bg-slate-100/80 p-1.5 rounded-2xl flex gap-1.5 backdrop-blur-md border border-slate-200/60 shadow-inner">
             <button
               onClick={() => setManifestSubTab("incoming")}
-              className={`flex-1 py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all duration-200 cursor-pointer ${
                 manifestSubTab === "incoming"
-                  ? "bg-[#00B14F] text-white shadow-sm"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  ? "bg-white text-slate-900 shadow-sm font-bold scale-[1.01]"
+                  : "text-slate-500 hover:text-slate-800 hover:bg-white/40"
               }`}
             >
-              <ArrowDownLeft size={16} /> Incoming Buses ({INITIAL_INCOMING.length})
+              <ArrowDownLeft
+                size={15}
+                className={
+                  manifestSubTab === "incoming"
+                    ? "text-[#00B14F]"
+                    : "text-slate-400"
+                }
+              />
+              <span>Incoming</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                  manifestSubTab === "incoming"
+                    ? "bg-emerald-100 text-[#00B14F]"
+                    : "bg-slate-200 text-slate-600"
+                }`}
+              >
+                {stationIncoming.length}
+              </span>
             </button>
 
             <button
               onClick={() => setManifestSubTab("outgoing")}
-              className={`flex-1 py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all duration-200 cursor-pointer ${
                 manifestSubTab === "outgoing"
-                  ? "bg-slate-900 text-white shadow-sm"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  ? "bg-white text-slate-900 shadow-sm font-bold scale-[1.01]"
+                  : "text-slate-500 hover:text-slate-800 hover:bg-white/40"
               }`}
             >
-              <ArrowUpRight size={16} /> Outgoing / Departed ({INITIAL_OUTGOING.length})
+              <ArrowUpRight
+                size={15}
+                className={
+                  manifestSubTab === "outgoing"
+                    ? "text-[#00B14F]"
+                    : "text-slate-400"
+                }
+              />
+              <span>Departed</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                  manifestSubTab === "outgoing"
+                    ? "bg-emerald-100 text-[#00B14F]"
+                    : "bg-slate-200 text-slate-600"
+                }`}
+              >
+                {stationOutgoing.length}
+              </span>
             </button>
           </div>
 
-          {/* Manifest Content */}
           <div className="space-y-3">
             {manifestSubTab === "incoming"
-              ? INITIAL_INCOMING.map((trip) => {
+              ? stationIncoming.map((trip) => {
                   const paperTickets = Math.max(
                     0,
                     trip.capacity - trip.urugendoPassengers,
@@ -1065,7 +1315,7 @@ export default function AgencyDashboard() {
                     </div>
                   );
                 })
-              : INITIAL_OUTGOING.map((trip) => {
+              : stationOutgoing.map((trip) => {
                   const empty = emptySeats[trip.id] ?? 0;
                   const paperTickets = Math.max(
                     0,
@@ -1077,7 +1327,7 @@ export default function AgencyDashboard() {
                       key={trip.id}
                       className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3"
                     >
-                      <div className="flex justify-between items-start">
+                      <div className="flex items-start justify-between">
                         <div>
                           <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
                             OUTBOUND TO {trip.to.toUpperCase()}
@@ -1085,11 +1335,11 @@ export default function AgencyDashboard() {
                           <h2 className="text-base font-black text-slate-900">
                             Bus {trip.busPlate}
                           </h2>
-                          <p className="text-xs text-slate-500 font-semibold">
+                          <p className="text-xs text-slate-500 font-semibold mt-0.5">
                             Driver: {trip.driverName} · Departed: {trip.time}
                           </p>
                         </div>
-                        <span className="bg-slate-100 text-slate-700 text-[10.5px] font-extrabold px-2.5 py-1 rounded-full">
+                        <span className="bg-red-50/90 text-red-600 border border-red-100/80 text-[10.5px] font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap shrink-0">
                           Left Station
                         </span>
                       </div>
@@ -1146,7 +1396,7 @@ export default function AgencyDashboard() {
                                 ),
                               }))
                             }
-                            className="w-16 bg-white border border-slate-300 rounded-lg py-1 px-2 text-center font-bold text-xs text-slate-800 focus:ring-2 focus:ring-[#00B14F] focus:outline-none"
+                            className="w-16 bg-[#ffffff] border border-slate-300 rounded-lg py-1 px-2 text-center font-bold text-xs text-slate-800 focus:ring-2 focus:ring-[#00B14F] focus:outline-none"
                           />
                           <button
                             onClick={() => handleSaveEmptySeats(trip.id)}
@@ -1170,12 +1420,12 @@ export default function AgencyDashboard() {
                   );
                 })}
 
-            {/* Styled Printable Excel Manifest Action Button */}
             <button
               onClick={exportStyledExcelReport}
               className="w-full mt-4 bg-[#00B14F] hover:bg-[#00B14F]/90 text-white font-bold py-3.5 px-4 rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-wide cursor-pointer"
             >
-              <FileSpreadsheet size={16} /> Generate Printable Manifest ({manifestSubTab})
+              <FileSpreadsheet size={16} /> Generate Printable Manifest (
+              {manifestSubTab})
             </button>
           </div>
         </div>
