@@ -26,7 +26,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [phone, setPhone] = useState("");
-  const [otpSent, setOtpSent] = useState(false);
+  const [, setOtpSent] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -36,9 +36,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           phone: session.user.phone || "",
           name: "",
           role: "passenger",
-          points: 0,
-          rating: 5,
-          totalTrips: 0,
           createdAt: session.user.created_at,
         });
       }
@@ -54,9 +51,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           phone: session.user.phone || "",
           name: "",
           role: "passenger",
-          points: 0,
-          rating: 5,
-          totalTrips: 0,
           createdAt: session.user.created_at,
         });
       } else {

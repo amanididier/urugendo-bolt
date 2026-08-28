@@ -90,8 +90,8 @@ export async function fetchTrips(
           rating: 4.8,
           totalReviews: 120,
         },
-        from: t.route_from || "Kigali",
-        to: t.route_to || "Musanze",
+        from: t.route_from || t.from || "Kigali",
+        to: t.route_to || t.to || "Musanze",
         departureTime: t.departure_time || "08:00",
         arrivalTime: t.arrival_time || "10:00",
         duration: t.duration || "2h 00m",
@@ -143,8 +143,8 @@ export async function fetchTripById(id: string): Promise<Trip | null> {
         rating: 4.8,
         totalReviews: 120,
       },
-      from: data.route_from || "Kigali",
-      to: data.route_to || "Musanze",
+      from: data.route_from || data.from || "Kigali",
+      to: data.route_to || data.to || "Musanze",
       departureTime: data.departure_time || "08:00",
       arrivalTime: data.arrival_time || "10:00",
       duration: data.duration || "2h 00m",
@@ -184,7 +184,10 @@ export async function createTrip(
   },
 ): Promise<Trip | null> {
   try {
-    let operatorId = tripData.operator?.id;
+    let operatorId =
+      typeof tripData.operator === "object" && tripData.operator !== null
+        ? tripData.operator.id
+        : undefined;
 
     if (!operatorId) {
       const { data: ops } = await supabase
@@ -207,6 +210,8 @@ export async function createTrip(
     const payload: Record<string, any> = {
       route_from: resolvedFrom,
       route_to: resolvedTo,
+      from: resolvedFrom,
+      to: resolvedTo,
       travel_date: resolvedDate,
       price: tripData.price || 2500,
       currency: tripData.currency || "RWF",
@@ -246,8 +251,8 @@ export async function createTrip(
         rating: 4.8,
         totalReviews: 120,
       },
-      from: data.route_from || resolvedFrom,
-      to: data.route_to || resolvedTo,
+      from: data.route_from || data.from || resolvedFrom,
+      to: data.route_to || data.to || resolvedTo,
       departureTime: data.departure_time || "08:00",
       arrivalTime: data.arrival_time || "10:00",
       duration: data.duration || "2h 00m",
@@ -562,8 +567,8 @@ function formatBookingData(b: any): Booking {
         rating: 4.8,
         totalReviews: 120,
       },
-      from: b.trip?.route_from || "Kigali",
-      to: b.trip?.route_to || "Musanze",
+      from: b.trip?.route_from || b.trip?.from || "Kigali",
+      to: b.trip?.route_to || b.trip?.to || "Musanze",
       departureTime: b.trip?.departure_time || "08:00",
       arrivalTime: b.trip?.arrival_time || "10:00",
       duration: b.trip?.duration || "2h 00m",

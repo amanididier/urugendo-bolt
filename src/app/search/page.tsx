@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Bus, MapPin, Users } from "lucide-react";
 import { useApp } from "@/context/app-context";
 import { getTripsForRoute, formatPrice } from "@/lib/data";
 import { supabase } from "@/lib/supabase";
@@ -21,6 +21,33 @@ const filters: { key: FilterKey; label: string }[] = [
   { key: "wifi", label: "📶 WiFi" },
 ];
 
+const cleanStationName = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/branch|station/g, "")
+    .trim();
+
+const isDepartureTimeValid = (tripDate?: string, departureTime?: string) => {
+  if (!departureTime) return true;
+
+  const now = new Date();
+  const todayStr = format(now, "yyyy-MM-dd");
+
+  if (tripDate && tripDate > todayStr) return true;
+  if (tripDate && tripDate < todayStr) return false;
+
+  const [depHours, depMins] = departureTime.split(":").map(Number);
+  if (isNaN(depHours) || isNaN(depMins)) return true;
+
+  const currentHours = now.getHours();
+  const currentMins = now.getMinutes();
+
+  if (depHours > currentHours) return true;
+  if (depHours === currentHours && depMins > currentMins) return true;
+
+  return false;
+};
+
 export default function SearchPage() {
   const router = useRouter();
   const { search, setSelectedTrip, language } = useApp();
@@ -35,36 +62,68 @@ export default function SearchPage() {
 
     async function loadFilteredTrips() {
       try {
-        // Call Supabase RPC function (Hides buses departing within 10 minutes)
-        const { data: dbTrips, error } = await supabase.rpc(
-          "get_available_trips",
-          {
-            search_origin: search.from,
-            search_destination: search.to,
-          },
+        const searchFromClean = cleanStationName(search.from);
+        const searchToClean = cleanStationName(search.to);
+
+        const { data: rawDbTrips, error: dbError } = await supabase
+          .from("trips")
+          .select("*");
+
+        if (!cancelled && !dbError && rawDbTrips && rawDbTrips.length > 0) {
+          const matchedDbTrips = rawDbTrips.filter((t: any) => {
+            const dbFrom = cleanStationName(t.route_from || t.from || "");
+            const dbTo = cleanStationName(t.route_to || t.to || "");
+            const dbDate = t.travel_date || t.travelDate || t.date;
+            const depTime = t.departure_time || t.departureTime;
+
+            // Strict exact match check to prevent cross-branch mixing (e.g. Kigali->Huye vs Musanze->Kigali)
+            const matchesRoute =
+              dbFrom === searchFromClean && dbTo === searchToClean;
+
+            const matchesDate =
+              !search.date || !dbDate || dbDate === search.date;
+            const isUpcoming = isDepartureTimeValid(
+              dbDate || search.date,
+              depTime,
+            );
+
+            return matchesRoute && matchesDate && isUpcoming;
+          });
+
+          if (matchedDbTrips.length > 0) {
+            setTrips(
+              matchedDbTrips.map((t: any) => ({
+                id: t.id,
+                from: t.route_from || t.from,
+                to: t.route_to || t.to,
+                departureTime: t.departure_time || t.departureTime,
+                arrivalTime: t.arrival_time || t.arrivalTime,
+                price: t.price,
+                availableSeats: t.available_seats ?? t.total_seats ?? 29,
+                totalSeats: t.total_seats ?? 29,
+                plateNumber: t.plate_number || t.plateNumber,
+                operator: t.operator || "Virunga Express",
+                amenities: t.amenities || ["⚡", "📶"],
+                duration: t.duration || "2h 30m",
+                terminalFrom: t.route_from || t.from,
+                terminalTo: t.route_to || t.to,
+                busType: t.bus_type || t.busType,
+              })),
+            );
+            setLoading(false);
+            return;
+          }
+        }
+
+        const staticTrips = getTripsForRoute(
+          search.from,
+          search.to,
+          search.date,
+        ).filter((trip) =>
+          isDepartureTimeValid(search.date, trip.departureTime),
         );
 
-        if (cancelled) return;
-
-        if (!error && dbTrips && dbTrips.length > 0) {
-          setTrips(dbTrips);
-        } else {
-          // Fallback static data filtered client-side for 10-minute departure limit
-          const now = new Date();
-          const tenMinsFromNow = new Date(now.getTime() + 10 * 60 * 1000);
-          const staticTrips = getTripsForRoute(
-            search.from,
-            search.to,
-            search.date,
-          ).filter((trip) => {
-            if (!trip.departureTime) return true;
-            const [hours, minutes] = trip.departureTime.split(":").map(Number);
-            const tripDate = new Date();
-            tripDate.setHours(hours, minutes, 0, 0);
-            return tripDate > tenMinsFromNow;
-          });
-          setTrips(staticTrips);
-        }
+        setTrips(staticTrips);
       } catch (err) {
         console.error("Failed to load available trips:", err);
       } finally {
@@ -101,7 +160,8 @@ export default function SearchPage() {
 
   const filteredTrips = trips
     .filter((trip) => {
-      if (activeFilter === "ac") return trip.amenities?.includes("❄️");
+      if (activeFilter === "ac")
+        return trip.amenities?.includes("⚡") || trip.amenities?.includes("❄️");
       if (activeFilter === "wifi") return trip.amenities?.includes("📶");
       return true;
     })
@@ -120,20 +180,20 @@ export default function SearchPage() {
   const getSeatBadge = (available: number = 0) => {
     if (available <= 2)
       return {
-        bg: "bg-badge-red-bg",
-        text: "text-badge-red-text",
-        label: `${available} left!`,
+        bg: "bg-red-100 border border-red-200",
+        text: "text-red-700",
+        label: `${available} seats left!`,
       };
     if (available <= 5)
       return {
-        bg: "bg-badge-amber-bg",
-        text: "text-badge-amber-text",
-        label: `${available} left`,
+        bg: "bg-amber-100 border border-amber-200",
+        text: "text-amber-800",
+        label: `${available} seats left`,
       };
     return {
-      bg: "bg-badge-green-bg",
-      text: "text-badge-green-text",
-      label: `${available} seats`,
+      bg: "bg-emerald-100 border border-emerald-200",
+      text: "text-emerald-800",
+      label: `${available} seats available`,
     };
   };
 
@@ -161,7 +221,6 @@ export default function SearchPage() {
         </div>
       </div>
 
-      {/* Filters */}
       <div
         className="flex gap-2 px-5 py-3 overflow-x-auto"
         style={{ scrollbarWidth: "none" }}
@@ -229,8 +288,11 @@ export default function SearchPage() {
               operatorObj?.name ||
               (typeof trip.operator === "string"
                 ? trip.operator
-                : "Bus Operator");
+                : "Virunga Express");
             const operatorGradient = operatorObj?.gradient;
+
+            const fromStation = trip.terminalFrom || trip.from || search.from;
+            const toStation = trip.terminalTo || trip.to || search.to;
 
             return (
               <motion.div
@@ -240,65 +302,90 @@ export default function SearchPage() {
                 transition={{ delay: i * 0.06 }}
                 className="bg-white rounded-2xl border border-border p-4 shadow-card active:scale-[0.99] transition-transform"
               >
-                <div className="flex items-center gap-3 mb-3">
-                  <div
-                    className="w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0 bg-primary/10"
-                    style={
-                      operatorGradient
-                        ? { background: operatorGradient }
-                        : undefined
-                    }
-                  >
-                    {operatorEmoji}
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-[15px] font-bold text-text-primary">
-                      {operatorName}
+                <div className="flex items-center justify-between gap-2 mb-3 pb-2 border-b border-gray-100">
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className="w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 bg-primary/10"
+                      style={
+                        operatorGradient
+                          ? { background: operatorGradient }
+                          : undefined
+                      }
+                    >
+                      {operatorEmoji}
+                    </div>
+                    <div>
+                      <div className="text-[15px] font-bold text-text-primary leading-tight">
+                        {operatorName}
+                      </div>
+                      {trip.plateNumber && (
+                        <span className="text-[11px] text-text-muted bg-gray-100 px-1.5 py-0.5 rounded font-mono">
+                          {trip.plateNumber}
+                        </span>
+                      )}
                     </div>
                   </div>
-                  <div className={`px-2.5 py-1 rounded-full ${badge.bg}`}>
+
+                  <div
+                    className={`px-2.5 py-1 rounded-full flex items-center gap-1 ${badge.bg}`}
+                  >
+                    <Users size={12} className={badge.text} />
                     <span className={`text-[11px] font-bold ${badge.text}`}>
                       {badge.label}
                     </span>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 mb-3">
+                <div className="flex items-center justify-between gap-2 mb-3">
                   <div className="flex-1 min-w-0">
-                    <div className="text-[28px] font-black text-text-primary leading-none">
+                    <div className="text-[10px] uppercase font-bold text-primary tracking-wider mb-0.5">
+                      Departs
+                    </div>
+                    <div className="text-[26px] font-black text-text-primary leading-none">
                       {trip.departureTime}
                     </div>
-                    <div className="text-[11px] text-text-muted mt-1 truncate">
-                      {trip.terminalFrom}
+                    <div className="flex items-center gap-1 text-[12px] font-semibold text-text-secondary mt-1 truncate">
+                      <MapPin
+                        size={12}
+                        className="text-primary flex-shrink-0"
+                      />
+                      <span className="truncate">{fromStation}</span>
                     </div>
                   </div>
 
-                  <div className="flex flex-col items-center gap-1 flex-shrink-0">
-                    <span className="text-[12px] text-primary font-medium">
-                      {trip.duration}
+                  <div className="flex flex-col items-center gap-1 flex-shrink-0 px-2">
+                    <span className="text-[11px] text-primary font-bold bg-primary/10 px-2 py-0.5 rounded-full">
+                      {trip.duration || "2h 30m"}
                     </span>
-                    <div className="w-14 h-[2px] bg-primary/20 relative rounded-full">
-                      <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-primary" />
-                      <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-primary" />
+                    <div className="w-12 h-[2px] bg-primary/30 relative rounded-full my-1">
+                      <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-primary" />
+                      <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-primary" />
                     </div>
                   </div>
 
                   <div className="flex-1 min-w-0 text-right">
-                    <div className="text-[28px] font-black text-text-primary leading-none">
+                    <div className="text-[10px] uppercase font-bold text-text-muted tracking-wider mb-0.5">
+                      Arrives
+                    </div>
+                    <div className="text-[26px] font-black text-text-primary leading-none">
                       {trip.arrivalTime}
                     </div>
-                    <div className="text-[11px] text-text-muted mt-1 truncate">
-                      {trip.terminalTo}
+                    <div className="flex items-center justify-end gap-1 text-[12px] font-semibold text-text-secondary mt-1 truncate">
+                      <span className="truncate">{toStation}</span>
+                      <MapPin
+                        size={12}
+                        className="text-text-muted flex-shrink-0"
+                      />
                     </div>
                   </div>
                 </div>
 
                 {trip.amenities && trip.amenities.length > 0 && (
-                  <div className="flex gap-2 mb-3">
+                  <div className="flex gap-1.5 mb-3">
                     {trip.amenities.map((a, j) => (
                       <div
                         key={j}
-                        className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center text-[14px]"
+                        className="px-2 py-0.5 rounded-md bg-gray-50 border border-gray-100 text-[12px] text-text-muted flex items-center gap-1"
                       >
                         {a}
                       </div>
@@ -306,12 +393,12 @@ export default function SearchPage() {
                   </div>
                 )}
 
-                <div className="flex items-center justify-between pt-1">
+                <div className="flex items-center justify-between pt-2 border-t border-dashed border-gray-200">
                   <div>
                     <div className="text-[11px] text-text-muted">
                       {t("perSeat", language)}
                     </div>
-                    <div className="text-[20px] font-bold text-primary">
+                    <div className="text-[20px] font-extrabold text-primary">
                       {formatPrice(trip.price ?? 0)}
                     </div>
                   </div>

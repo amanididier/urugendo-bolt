@@ -93,7 +93,17 @@ type TranslationKey =
   | "airtelMoney"
   | "bankCard"
   | "processing"
-  | "totalLabel";
+  | "totalLabel"
+  // Added for Tickets & Details Full Support
+  | "verificationPending"
+  | "ticketMissed"
+  | "ticketUsed"
+  | "passActive"
+  | "passMissed"
+  | "passUsed"
+  | "contactAgency"
+  | "aboutThisTrip"
+  | "scanQrPrompt";
 
 const translations: Record<TranslationKey, Record<Language, string>> = {
   // Home
@@ -166,7 +176,7 @@ const translations: Record<TranslationKey, Record<Language, string>> = {
   to2: { EN: "To", RW: "Kujya" },
   date: { EN: "Date", RW: "Itariki" },
   time: { EN: "Time", RW: "Isaha" },
-  passenger: { EN: "Passenger", RW: "Umurwayi" },
+  passenger: { EN: "Passenger", RW: "Umugenzi" },
   downloadTicket: { EN: "Download Ticket", RW: "Kurura Ikarita" },
   shareTicket: { EN: "Share Ticket", RW: "Sangira Ikarita" },
   backHome: { EN: "Back to Home", RW: "Subira Ahande" },
@@ -243,6 +253,35 @@ const translations: Record<TranslationKey, Record<Language, string>> = {
   bankCard: { EN: "Bank Card", RW: "Ikarita ya Banki" },
   processing: { EN: "⏳ Processing...", RW: "⏳ Birakora..." },
   totalLabel: { EN: "Total", RW: "Igiteranyo" },
+
+  // Tickets full translation states
+  verificationPending: {
+    EN: "Verification Pending",
+    RW: "Kugenzura Biracyakorwa",
+  },
+  ticketMissed: { EN: "Trip Missed", RW: "Urugendo Rwagucitse" },
+  ticketUsed: { EN: "Ticket Used", RW: "Itike Yakoreshejwe" },
+  passActive: {
+    EN: "Your digital bus pass is active",
+    RW: "Itike yawe irakora",
+  },
+  passMissed: {
+    EN: "Departure time has passed",
+    RW: "Igihe cyo guhaguruka cyarenze",
+  },
+  passUsed: {
+    EN: "This ticket was verified & used",
+    RW: "Itike yagenzuwe n'abayobozi",
+  },
+  contactAgency: {
+    EN: "Contact Agency Support",
+    RW: "Vugana n'Abakozi ba Agence",
+  },
+  aboutThisTrip: { EN: "About This Trip", RW: "Ibyerekeye Uru Rugendo" },
+  scanQrPrompt: {
+    EN: "Scan QR at terminal gate for instant boarding",
+    RW: "Sikana kuri gate kugira ngo wemezwe vuba",
+  },
 };
 
 export function t(key: TranslationKey, lang: Language): string {
