@@ -19,7 +19,7 @@ import {
 import { fetchAllBookings, fetchBookingsByUser } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import type { Booking } from "@/lib/types";
-import { addUserNotification } from "@/app/notifications/page";
+import { addUserNotification } from "@/app/user-notifications/page";
 
 const tabs = ["Upcoming", "Past"] as const;
 type Tab = (typeof tabs)[number];

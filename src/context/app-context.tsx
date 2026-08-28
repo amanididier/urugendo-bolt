@@ -9,9 +9,13 @@ import {
   ReactNode,
 } from "react";
 import { Language, Trip, Booking, PaymentMethod } from "@/lib/types";
-import { sampleBookings, generateBookingId, fetchDatabaseBranches } from "@/lib/data";
+import {
+  sampleBookings,
+  generateBookingId,
+  fetchDatabaseBranches,
+} from "@/lib/data";
 import { supabase } from "@/lib/supabase";
-import { addUserNotification } from "@/app/notifications/page";
+import { NotificationsPage } from "@/app/user-notifications/page";
 
 export type UserRole = "passenger" | "agent" | "driver" | "manager";
 export type AgentStatus = "approved" | "pending";
