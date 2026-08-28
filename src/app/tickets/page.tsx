@@ -159,7 +159,7 @@ export default function TicketsPage() {
 
     const params = new URLSearchParams(window.location.search);
     if (params.get("tab") === "past") {
-      setActiveTab("Past" as Tab);
+      setActiveTab("Past");
     }
   }, [language]);
 

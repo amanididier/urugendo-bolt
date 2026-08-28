@@ -411,7 +411,7 @@ export default function AgencyDashboard() {
           <Table ss:ExpandedColumnCount="${tableHeaders.length}" ss:FullColumns="1" ss:FullRows="1" ss:DefaultColumnWidth="110" ss:DefaultRowHeight="20">
             <Row ss:Height="26">
               <Cell ss:StyleID="Header" ss:MergeAcross="${tableHeaders.length - 1}">
-                <Data ss:Type="String">URUGENDO EXPRESS — STATION MANIFEST (${manifestSubTab.toUpperCase()})</Data>
+                <Data ss:Type="String">WEKA EXPRESS — STATION MANIFEST (${manifestSubTab.toUpperCase()})</Data>
               </Cell>
             </Row>
             <Row ss:Height="18">
@@ -606,7 +606,7 @@ export default function AgencyDashboard() {
       });
       // Also dispatch a custom event for global background listeners
       window.dispatchEvent(
-        new CustomEvent("urugendo-trip-delayed", {
+        new CustomEvent("weka-trip-delayed", {
           detail: { tripId, destination },
         }),
       );
@@ -689,7 +689,7 @@ export default function AgencyDashboard() {
                 Agency Dashboard
               </h1>
               <p className="text-[12px] text-white/80 font-medium">
-                Virunga Express • {agentBranch}
+                Weka Express • {agentBranch}
               </p>
             </div>
           </div>
@@ -785,7 +785,7 @@ export default function AgencyDashboard() {
                   <Ticket size={14} className="text-primary" />
                 </div>
                 <span className="text-[10px] font-medium text-text-muted">
-                  Urugendo Online
+                  Weka Online
                 </span>
               </div>
               <div className="text-[20px] font-bold text-primary">
@@ -864,7 +864,7 @@ export default function AgencyDashboard() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: i * 0.05 }}
                     onClick={() =>
-                      router.push(`/agency/schedules?tripId=${trip.id}`)
+                      router.push(`/agency/schedule?tripId=${trip.id}`)
                     }
                     className="bg-white rounded-xl border border-border overflow-hidden shadow-sm hover:border-primary cursor-pointer transition-all"
                   >
@@ -906,7 +906,7 @@ export default function AgencyDashboard() {
                       <div className="mb-2 bg-emerald-50/70 border border-emerald-100 rounded-lg p-2 text-[11px] flex items-center justify-between">
                         <span className="font-bold text-emerald-800 flex items-center gap-1.5">
                           <Users size={13} className="text-emerald-600" />
-                          Urugendo Passengers:
+                          Weka Passengers:
                         </span>
                         <span className="font-extrabold text-emerald-700 bg-white px-2 py-0.5 rounded-md shadow-2xs">
                           {bookedCount} subscribed
@@ -1295,7 +1295,7 @@ export default function AgencyDashboard() {
                         </div>
                         <div className="bg-emerald-50 p-2 rounded-xl">
                           <span className="text-[9.5px] font-bold text-emerald-600 block uppercase">
-                            Urugendo App
+                            Weka App
                           </span>
                           <span className="text-xs font-black text-[#00B14F] flex items-center justify-center gap-1">
                             <Ticket size={12} />
@@ -1347,7 +1347,7 @@ export default function AgencyDashboard() {
                       <div className="grid grid-cols-3 gap-2 py-2 border-y border-slate-100 text-center">
                         <div>
                           <span className="text-[9.5px] font-bold text-slate-400 block uppercase">
-                            Urugendo App
+                            Weka App
                           </span>
                           <span className="text-xs font-black text-[#00B14F]">
                             {trip.urugendoPassengers} Passengers

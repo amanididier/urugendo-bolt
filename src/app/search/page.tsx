@@ -71,8 +71,8 @@ export default function SearchPage() {
 
         if (!cancelled && !dbError && rawDbTrips && rawDbTrips.length > 0) {
           const matchedDbTrips = rawDbTrips.filter((t: any) => {
-            const dbFrom = cleanStationName(t.from || "");
-            const dbTo = cleanStationName(t.to || "");
+            const dbFrom = cleanStationName(t.route_from || t.from || "");
+            const dbTo = cleanStationName(t.route_to || t.to || "");
             const dbDate = t.travel_date || t.travelDate || t.date;
             const depTime = t.departure_time || t.departureTime;
 
@@ -94,8 +94,8 @@ export default function SearchPage() {
             setTrips(
               matchedDbTrips.map((t: any) => ({
                 id: t.id,
-                from: t.from,
-                to: t.to,
+                from: t.route_from || t.from,
+                to: t.route_to || t.to,
                 departureTime: t.departure_time || t.departureTime,
                 arrivalTime: t.arrival_time || t.arrivalTime,
                 price: t.price,
@@ -105,8 +105,8 @@ export default function SearchPage() {
                 operator: t.operator || "Virunga Express",
                 amenities: t.amenities || ["⚡", "📶"],
                 duration: t.duration || "2h 30m",
-                terminalFrom: t.from,
-                terminalTo: t.to,
+                terminalFrom: t.route_from || t.from,
+                terminalTo: t.route_to || t.to,
                 busType: t.bus_type || t.busType,
               })),
             );
