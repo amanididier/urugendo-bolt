@@ -33,7 +33,7 @@ import {
   updateBookingStatus,
   updateTripStatus,
 } from "@/lib/api";
-import { supabase } from "@/lib/supabase"; // Added for Supabase real-time agent verification status checks
+import { supabase } from "@/lib/supabase";
 import type { Trip, Booking, AgencyBranch } from "@/lib/types";
 
 export interface ExtendedBooking extends Omit<Partial<Booking>, "status"> {
