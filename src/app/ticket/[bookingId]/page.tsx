@@ -154,7 +154,7 @@ export default function TicketDetailPage() {
   const router = useRouter();
   const { language } = useApp();
 
-  const langKey = language === "rw" ? "rw" : "en";
+  const langKey = language === "RW" ? "rw" : "en";
   const t = translations[langKey];
 
   const rawId = (params.bookingId ||
@@ -353,7 +353,10 @@ export default function TicketDetailPage() {
   const isMissed = status === "missed";
   const isUsed = status === "used" || status === "boarded";
 
-  const operatorName = booking.trip?.operator?.name || "Virunga Express";
+  const operatorName =
+    typeof booking.trip?.operator === "object" && booking.trip.operator !== null
+      ? booking.trip.operator.name
+      : (booking.trip?.operator as string) || "Virunga Express";
   const branchName = getCityName(booking.trip?.from, "Musanze Terminal");
   const plateNumber = booking.trip?.plateNumber || "RAD 100B";
   const busType = booking.trip?.busType || "Coaster Express";

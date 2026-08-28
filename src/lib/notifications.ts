@@ -8,7 +8,7 @@ export interface AppNotification {
   message: string;
   timestamp: string;
   read: boolean;
-  type?: "verification" | "delay" | "reminder" | "promo" | "general";
+  type?: "verification" | "delay" | "reminder" | "promo" | "general" | "security" | "booking";
   actionUrl?: string;
 }
 
@@ -35,7 +35,11 @@ export function getStoredNotifications(): AppNotification[] {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_NOTIFICATIONS));
       return DEFAULT_NOTIFICATIONS;
     }
-    return JSON.parse(data);
+    const parsed = JSON.parse(data);
+    return parsed.map((n: any) => ({
+      ...n,
+      timestamp: n.timestamp || n.createdAt || new Date().toISOString(),
+    }));
   } catch (e) {
     return DEFAULT_NOTIFICATIONS;
   }
@@ -53,13 +57,14 @@ export function saveNotifications(notifications: AppNotification[]) {
 }
 
 export function addUserNotification(
-  notification: Omit<AppNotification, "id" | "timestamp" | "read">,
+  notification: Omit<AppNotification, "id" | "timestamp" | "read"> & { createdAt?: string },
 ) {
   const current = getStoredNotifications();
+  const nowStr = new Date().toISOString();
   const newNotification: AppNotification = {
     ...notification,
     id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
-    timestamp: new Date().toISOString(),
+    timestamp: notification.createdAt || nowStr,
     read: false,
   };
   saveNotifications([newNotification, ...current]);

@@ -184,7 +184,10 @@ export async function createTrip(
   },
 ): Promise<Trip | null> {
   try {
-    let operatorId = tripData.operator?.id;
+    let operatorId =
+      typeof tripData.operator === "object" && tripData.operator !== null
+        ? tripData.operator.id
+        : undefined;
 
     if (!operatorId) {
       const { data: ops } = await supabase

@@ -15,9 +15,10 @@ import {
   fetchDatabaseBranches,
 } from "@/lib/data";
 import { supabase } from "@/lib/supabase";
-import { NotificationsPage } from "@/app/user-notifications/page";
+import { addUserNotification } from "@/lib/notifications";
+// Removed unused NotificationsPage import to prevent strict TS warnings
 
-export type UserRole = "passenger" | "agent" | "driver" | "manager";
+export type UserRole = "passenger" | "agent" | "manager";
 export type AgentStatus = "approved" | "pending";
 
 interface SearchState {
@@ -94,7 +95,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     const savedRole = localStorage.getItem("urugendo_role");
     if (
-      savedRole === "driver" ||
       savedRole === "agent" ||
       savedRole === "passenger" ||
       savedRole === "manager"
@@ -174,8 +174,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const now = new Date();
 
       bookings.forEach((booking) => {
-        if (!booking.date || !booking.time) return;
-        const departureDateTime = new Date(`${booking.date}T${booking.time}`);
+        const bookingDate = booking.trip?.date || (booking as any).bookingDate;
+        const bookingTime =
+          booking.trip?.departureTime || (booking as any).time;
+        if (!bookingDate || !bookingTime) return;
+
+        const departureDateTime = new Date(`${bookingDate}T${bookingTime}`);
         if (isNaN(departureDateTime.getTime())) return;
 
         const diffMinutes =
@@ -189,7 +193,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               title: "⏰ Upcoming Trip Reminder",
               message:
                 "⏰ Upcoming Trip: Today you have a trip to Kigali! Get your bags packed and ready so you don’t miss your departure.",
-              type: "departure",
+              type: "reminder",
             });
           }
         }
@@ -202,7 +206,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               title: "🚌 Final Call",
               message:
                 "🚌 Final Call: Your bus will depart in 15 minutes. Please head to the terminal gate for final ticket verification.",
-              type: "departure",
+              type: "reminder",
             });
           }
         }

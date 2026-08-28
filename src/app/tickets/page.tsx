@@ -19,7 +19,7 @@ import {
 import { fetchAllBookings, fetchBookingsByUser } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import type { Booking } from "@/lib/types";
-import { addUserNotification } from "@/app/user-notifications/page";
+import { addUserNotification } from "@/lib/notifications";
 
 const tabs = ["Upcoming", "Past"] as const;
 type Tab = (typeof tabs)[number];
@@ -129,7 +129,7 @@ export default function TicketsPage() {
 
               const isFirstTrip = index === loadedBookings.length - 1;
               const msg =
-                language === "rw"
+                language === "RW"
                   ? isFirstTrip
                     ? `✨ Wanyuzwe n'urugendo? Gutangira gukoresha Urugendo ni intangiriro nziza! Sangiza urugendo rwiza n'inshuti zawe n'abavandimwe ukoresha ubutumire bwawe bwite: ${shareLink}`
                     : `🌟 Aho wari ugiye wahageze neza! Niba Urugendo rworohereje urugendo rwawe uyu munsi, sangiza urukundo n'inshuti zawe: ${shareLink}`
@@ -139,7 +139,7 @@ export default function TicketsPage() {
 
               addUserNotification({
                 title:
-                  language === "rw"
+                  language === "RW"
                     ? isFirstTrip
                       ? "✨ Urugendo rwarangiye!"
                       : "🌟 Wageze ku ntego!"
@@ -159,7 +159,7 @@ export default function TicketsPage() {
 
     const params = new URLSearchParams(window.location.search);
     if (params.get("tab") === "past") {
-      setActiveTab("Past");
+      setActiveTab("Past" as Tab);
     }
   }, [language]);
 
@@ -215,7 +215,8 @@ export default function TicketsPage() {
     return false;
   };
 
-  const currentUserName = userName || (language === "rw" ? "Umugenzi" : "Passenger");
+  const currentUserName =
+    userName || (language === "RW" ? "Umugenzi" : "Passenger");
 
   const upcomingBookings = bookings.filter((b) => {
     const hasPassed = isTripPast(b);
@@ -315,10 +316,10 @@ export default function TicketsPage() {
               className="text-[12px] font-bold text-primary hover:underline cursor-pointer bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-100 transition-all"
             >
               {isSelectingMode
-                ? language === "rw"
+                ? language === "RW"
                   ? "Birangiye"
                   : "Done"
-                : language === "rw"
+                : language === "RW"
                   ? "Hitamo"
                   : "select"}
             </button>
@@ -338,10 +339,12 @@ export default function TicketsPage() {
               className="flex flex-col items-center justify-center py-20"
             >
               <div className="text-[13px] text-slate-400 font-semibold animate-pulse">
-                {language === "rw" ? "Amatike arimo kuzana..." : "Loading tickets..."}
+                {language === "RW"
+                  ? "Amatike arimo kuzana..."
+                  : "Loading tickets..."}
               </div>
             </motion.div>
-          ) : activeTab === "Upcoming" && upcomingBookings.length === 0 ? ( nta amatike ari imbere
+          ) : activeTab === "Upcoming" && upcomingBookings.length === 0 ? (
             <motion.div
               key="empty-upcoming"
               initial={{ opacity: 0 }}
@@ -392,7 +395,7 @@ export default function TicketsPage() {
                   >
                     <span className="flex items-center gap-2">
                       <span>
-                        {language === "rw" ? "Ayandi Matike" : "Other Bookings"}
+                        {language === "RW" ? "Ayandi Matike" : "Other Bookings"}
                       </span>
                       <span className="text-[11px] bg-emerald-100 text-[#00B14F] px-2 py-0.5 rounded-full font-extrabold">
                         {otherUpcomingBookings.length}
@@ -434,14 +437,16 @@ export default function TicketsPage() {
                 >
                   <span className="text-xs font-bold text-rose-700">
                     {selectedTicketIds.length}{" "}
-                    {language === "rw" ? "itike zahiswemo" : "ticket(s) selected"}
+                    {language === "RW"
+                      ? "itike zahiswemo"
+                      : "ticket(s) selected"}
                   </span>
                   <button
                     onClick={() => handleDeleteTickets(selectedTicketIds)}
                     className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
                   >
                     <Trash2 size={13} />{" "}
-                    {language === "rw" ? "Siba Izahiswemo" : "Delete Selected"}
+                    {language === "RW" ? "Siba Izahiswemo" : "Delete Selected"}
                   </button>
                 </motion.div>
               )}
@@ -486,7 +491,7 @@ export default function TicketsPage() {
                   >
                     <span className="flex items-center gap-2">
                       <span>
-                        {language === "rw" ? "Matike ya Kera" : "Older Tickets"}
+                        {language === "RW" ? "Matike ya Kera" : "Older Tickets"}
                       </span>
                       <span className="text-[11px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded-full font-extrabold">
                         {olderPast.length}
@@ -569,6 +574,11 @@ function TicketCard({
   const passengerName =
     booking.passengerName || booking.momoAccountName || currentUserName;
 
+  const operatorName =
+    typeof booking.trip?.operator === "object" && booking.trip.operator !== null
+      ? booking.trip.operator.name
+      : (booking.trip?.operator as string) || "Virunga Express";
+
   return (
     <motion.button
       initial={{ opacity: 0, y: 10 }}
@@ -582,16 +592,18 @@ function TicketCard({
         <div className="min-w-0 flex-1">
           {showPassengerName && passengerName && (
             <span className="text-[11px] font-bold text-primary block mb-0.5 truncate">
-              {language === "rw" ? "Umugenzi:" : "Passenger:"} {passengerName}
+              {language === "RW" ? "Umugenzi:" : "Passenger:"} {passengerName}
             </span>
           )}
           <div className="flex items-center gap-2 text-[16px] font-black text-slate-900 tracking-tight whitespace-nowrap overflow-hidden">
             <span className="truncate">
-              {booking.trip?.from || (language === "rw" ? "Itangiriro" : "Origin")}
+              {booking.trip?.from ||
+                (language === "RW" ? "Itangiriro" : "Origin")}
             </span>
             <span className="text-primary font-bold flex-shrink-0">→</span>
             <span className="truncate">
-              {booking.trip?.to || (language === "rw" ? "Aho Ugiye" : "Destination")}
+              {booking.trip?.to ||
+                (language === "RW" ? "Aho Ugiye" : "Destination")}
             </span>
           </div>
         </div>
@@ -599,23 +611,23 @@ function TicketCard({
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {booking.status === "pending" && (
             <span className="bg-amber-50 text-amber-700 text-[10.5px] font-extrabold px-2.5 py-0.5 rounded-full border border-amber-200">
-              {language === "rw" ? "Biracyasuzumwa ⏳" : "Processing ⏳"}
+              {language === "RW" ? "Biracyasuzumwa ⏳" : "Processing ⏳"}
             </span>
           )}
           {booking.status === "confirmed" && (
             <span className="bg-emerald-50 text-emerald-700 text-[10.5px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-200">
-              {language === "rw" ? "Byemejwe ✓" : "Confirmed ✓"}
+              {language === "RW" ? "Byemejwe ✓" : "Confirmed ✓"}
             </span>
           )}
           {isUsed && (
             <span className="bg-rose-50 text-rose-600 text-[10.5px] font-extrabold px-2.5 py-0.5 rounded-full border border-rose-200 flex items-center gap-1">
               <CheckCircle2 size={11} className="text-rose-600" />{" "}
-              {language === "rw" ? "Yakoreshejwe" : "Used"}
+              {language === "RW" ? "Yakoreshejwe" : "Used"}
             </span>
           )}
           {booking.status === "rejected" && (
             <span className="bg-rose-50 text-rose-700 text-[10.5px] font-extrabold px-2.5 py-0.5 rounded-full border border-rose-200">
-              {language === "rw" ? "Byanze ✕" : "Rejected ✕"}
+              {language === "RW" ? "Byanze ✕" : "Rejected ✕"}
             </span>
           )}
           <ChevronRight
@@ -635,11 +647,10 @@ function TicketCard({
           {booking.trip?.departureTime || "--:--"}
         </span>
         <span className="flex items-center gap-1">
-          <Bus size={12} className="text-slate-400" />{" "}
-          {booking.trip?.operator?.name || "Virunga Express"}
+          <Bus size={12} className="text-slate-400" /> {operatorName}
         </span>
         <span className="font-bold text-slate-700 ml-auto bg-slate-100 px-2 py-0.5 rounded-lg text-[11px]">
-          {language === "rw" ? "Icyafuraha" : "Seat"} {booking.seat || "3C"}
+          {language === "RW" ? "Icyafuraha" : "Seat"} {booking.seat || "3C"}
         </span>
       </div>
     </motion.button>

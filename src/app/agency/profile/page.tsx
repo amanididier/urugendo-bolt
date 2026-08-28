@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/context/app-context";
+import { Language } from "@/lib/types";
 
 export default function AgentProfilePage() {
   const router = useRouter();
@@ -280,7 +281,7 @@ export default function AgentProfilePage() {
               </span>
             </div>
             <div className="flex bg-slate-100 p-1 rounded-xl gap-1">
-              {(["EN", "FR", "KIN"] as const).map((lang) => (
+              {(["EN", "RW"] as const).map((lang: Language) => (
                 <button
                   key={lang}
                   onClick={() => setLanguage(lang)}
@@ -290,7 +291,7 @@ export default function AgentProfilePage() {
                       : "text-slate-500 hover:text-slate-800"
                   }`}
                 >
-                  {lang}
+                  {lang === "RW" ? "KIN" : lang}
                 </button>
               ))}
             </div>
