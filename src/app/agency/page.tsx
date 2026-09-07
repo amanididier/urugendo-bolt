@@ -148,8 +148,8 @@ export default function AgencyDashboard() {
         if (!storedAgentEmail) return;
 
         const { data, error } = await supabase
-          .from("agents")
-          .select("status, branch, id")
+          .from("agency_agents")
+          .select("status, branch_name, id")
           .eq("email", storedAgentEmail)
           .single();
 
@@ -170,7 +170,7 @@ export default function AgencyDashboard() {
             {
               event: "UPDATE",
               schema: "public",
-              table: "agents",
+              table: "agency_agents",
               filter: `email=eq.${storedAgentEmail}`,
             },
             (payload: any) => {
