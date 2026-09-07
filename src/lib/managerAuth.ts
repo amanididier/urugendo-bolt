@@ -79,7 +79,8 @@ async function pbkdf2(
   // base64-encode the result
   const bytes = new Uint8Array(bits);
   let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.length; i++)
+    binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
 }
 
@@ -139,7 +140,9 @@ export async function authenticateManager(
     return { ok: false, reason: "inactive" };
   }
 
-  if (record.managerCode.toLowerCase() !== input.managerCode.trim().toLowerCase()) {
+  if (
+    record.managerCode.toLowerCase() !== input.managerCode.trim().toLowerCase()
+  ) {
     return { ok: false, reason: "code_mismatch" };
   }
 
@@ -168,7 +171,10 @@ export function getStoredManagerId(): string | null {
   return localStorage.getItem("urugendo_manager_id");
 }
 
-export function getStoredManager(): Omit<ManagerRecord, "passwordHash" | "passwordSalt"> | null {
+export function getStoredManager(): Omit<
+  ManagerRecord,
+  "passwordHash" | "passwordSalt"
+> | null {
   if (typeof window === "undefined") return null;
   const id = localStorage.getItem("urugendo_manager_id");
   const name = localStorage.getItem("urugendo_manager_name");
@@ -183,10 +189,13 @@ export function getStoredManager(): Omit<ManagerRecord, "passwordHash" | "passwo
     managerCode: code,
     agencyName: agency,
     isActive: true,
+    passwordIter: 10000,
   };
 }
 
-export function persistManagerSession(manager: Omit<ManagerRecord, "passwordHash" | "passwordSalt">) {
+export function persistManagerSession(
+  manager: Omit<ManagerRecord, "passwordHash" | "passwordSalt">,
+) {
   if (typeof window === "undefined") return;
   localStorage.setItem("urugendo_manager_id", manager.id);
   localStorage.setItem("urugendo_manager_name", manager.name);
