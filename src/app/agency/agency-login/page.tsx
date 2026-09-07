@@ -25,6 +25,10 @@ import {
 } from "lucide-react";
 import { useApp } from "@/context/app-context";
 import { supabase } from "@/lib/supabase";
+import {
+  authenticateManager,
+  persistManagerSession,
+} from "@/lib/managerAuth";
 
 interface OperatorOption {
   id: string;
@@ -40,7 +44,10 @@ const DEFAULT_VIRUNGA_BRANCHES = [
   "Gicumbi",
 ];
 
-const MANAGER_EMAIL = "ishimweamanid@gmail.com";
+// Batch 5: manager credentials are no longer hardcoded — they're stored in
+// the public.agency_managers table and verified via src/lib/managerAuth.ts.
+// The form is still called "Manager Code" for clarity, but the value is
+// now matched against manager_code column in the DB.
 const LOCKOUT_KEY_PREFIX = "urugendo_lockout_";
 const FAILED_ATTEMPTS_KEY_PREFIX = "urugendo_failed_attempts_";
 
@@ -86,9 +93,7 @@ function LoginContent() {
   const [lockoutRemainingSecs, setLockoutRemainingSecs] = useState<number>(0);
 
   const [showManagerModal, setShowManagerModal] = useState(false);
-  const [managerName, setManagerName] = useState("");
   const [managerEmail, setManagerEmail] = useState("");
-  const [managerAgency, setManagerAgency] = useState("");
   const [managerCode, setManagerCode] = useState("");
   const [managerPassword, setManagerPassword] = useState("");
   const [managerError, setManagerError] = useState("");
@@ -343,6 +348,7 @@ function LoginContent() {
         try {
           await supabase.from("agency_agents").insert({
             id: authData.user.id,
+            user_id: authData.user.id,
             name: fullName,
             email,
             branch_name: selectedBranch,
@@ -398,11 +404,27 @@ function LoginContent() {
         .eq("id", authData.user.id)
         .single();
 
-      if (profile && profile.status === "pending") {
+      // Batch 1: also gate on agency_agents.is_approved. The profiles.status
+      // check is a defense-in-depth; the source of truth for "this agent may
+      // sign in" is the is_approved flag on the agency_agents row.
+      const { data: agentRow } = await supabase
+        .from("agency_agents")
+        .select("is_approved, status")
+        .eq("user_id", authData.user.id)
+        .maybeSingle();
+
+      const isApproved =
+        agentRow?.is_approved === true ||
+        profile?.status === "approved";
+
+      if (!isApproved) {
         setLoading(false);
         setRegisteredAgentEmail(email);
         setIsWaitingApproval(true); // Intercept and show waiting room popup
         await supabase.auth.signOut();
+        setError(
+          "Your account is pending manager approval. You'll be signed in once approved.",
+        );
         return;
       }
 
@@ -436,35 +458,47 @@ function LoginContent() {
     }
   };
 
-  const handleManagerLogin = (e: React.FormEvent) => {
+  const handleManagerLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setManagerError("");
 
-    if (
-      !managerName ||
-      !managerEmail ||
-      !managerAgency ||
-      !managerCode ||
-      !managerPassword
-    ) {
-      setManagerError("Please fill in all manager credentials.");
+    if (!managerEmail || !managerCode || !managerPassword) {
+      setManagerError("Please enter your email, manager code, and password.");
       return;
     }
 
-    if (managerEmail.toLowerCase() !== MANAGER_EMAIL.toLowerCase()) {
-      setManagerError(
-        `Access restricted. Authorized email is ${MANAGER_EMAIL}`,
-      );
+    // Batch 5: verify credentials against the agency_managers table.
+    // No more hardcoded email constant — everything checked in the DB.
+    const result = await authenticateManager({
+      email: managerEmail,
+      managerCode: managerCode,
+      password: managerPassword,
+    });
+
+    if (!result.ok) {
+      switch (result.reason) {
+        case "missing_fields":
+          setManagerError("All fields are required.");
+          break;
+        case "not_found":
+        case "code_mismatch":
+          setManagerError("Invalid email or manager code.");
+          break;
+        case "inactive":
+          setManagerError("This manager account has been deactivated.");
+          break;
+        case "bad_password":
+          setManagerError("Incorrect password.");
+          break;
+        default:
+          setManagerError("Authentication failed. Please try again.");
+      }
       return;
     }
 
-    if (typeof window !== "undefined") {
-      localStorage.setItem("urugendo_role", "manager");
-      localStorage.setItem("urugendo_agency", managerAgency);
-      localStorage.setItem("urugendo_manager_name", managerName);
-      localStorage.setItem("urugendo_manager_email", managerEmail);
-    }
-
+    // Success — persist session and redirect to manager dashboard.
+    const mgr = result.manager!;
+    persistManagerSession(mgr);
     setUserRole("manager");
     setShowManagerModal(false);
     router.push("/manager");
@@ -927,55 +961,28 @@ function LoginContent() {
               <form onSubmit={handleManagerLogin} className="mt-4 space-y-3">
                 <div>
                   <label className="text-[11.5px] font-bold text-text-primary block mb-1">
-                    Manager Full Name
+                    Manager Email
                   </label>
                   <input
-                    type="text"
-                    value={managerName}
-                    onChange={(e) => setManagerName(e.target.value)}
-                    placeholder="Manager Name"
+                    type="email"
+                    value={managerEmail}
+                    onChange={(e) => setManagerEmail(e.target.value)}
+                    placeholder="manager@virunga.com"
                     className="w-full h-10 px-3 rounded-xl border border-border text-[13px] font-medium focus:outline-none focus:border-primary"
                   />
                 </div>
 
                 <div>
                   <label className="text-[11.5px] font-bold text-text-primary block mb-1">
-                    Official Manager Email
+                    Manager Code
                   </label>
                   <input
-                    type="email"
-                    value={managerEmail}
-                    onChange={(e) => setManagerEmail(e.target.value)}
-                    placeholder={MANAGER_EMAIL}
-                    className="w-full h-10 px-3 rounded-xl border border-border text-[13px] font-medium focus:outline-none focus:border-primary"
+                    type="text"
+                    value={managerCode}
+                    onChange={(e) => setManagerCode(e.target.value)}
+                    placeholder="MGR-001"
+                    className="w-full h-10 px-3 rounded-xl border border-border text-[13px] font-mono font-bold focus:outline-none focus:border-primary"
                   />
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[11.5px] font-bold text-text-primary block mb-1">
-                      Agency Name
-                    </label>
-                    <input
-                      type="text"
-                      value={managerAgency}
-                      onChange={(e) => setManagerAgency(e.target.value)}
-                      placeholder="Virunga Express"
-                      className="w-full h-10 px-3 rounded-xl border border-border text-[13px] font-medium focus:outline-none focus:border-primary"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11.5px] font-bold text-text-primary block mb-1">
-                      Manager Code
-                    </label>
-                    <input
-                      type="text"
-                      value={managerCode}
-                      onChange={(e) => setManagerCode(e.target.value)}
-                      placeholder="MGR-001"
-                      className="w-full h-10 px-3 rounded-xl border border-border text-[13px] font-mono font-bold focus:outline-none focus:border-primary"
-                    />
-                  </div>
                 </div>
 
                 <div>

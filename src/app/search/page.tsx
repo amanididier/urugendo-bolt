@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { ChevronLeft, Bus, MapPin, Users } from "lucide-react";
 import { useApp } from "@/context/app-context";
-import { getTripsForRoute, formatPrice } from "@/lib/data";
+import { formatPrice } from "@/lib/data";
 import { supabase } from "@/lib/supabase";
 import { Trip } from "@/lib/types";
 import { t } from "@/lib/translations";
@@ -115,15 +115,12 @@ export default function SearchPage() {
           }
         }
 
-        const staticTrips = getTripsForRoute(
-          search.from,
-          search.to,
-          search.date,
-        ).filter((trip) =>
-          isDepartureTimeValid(search.date, trip.departureTime),
-        );
-
-        setTrips(staticTrips);
+        // Batch 3: no DB rows matched. Show honest empty state.
+        // Do NOT fall back to getTripsForRoute (returns []) or any other
+        // synthesized trips — never show fake departures to users.
+        if (!cancelled) {
+          setTrips([]);
+        }
       } catch (err) {
         console.error("Failed to load available trips:", err);
       } finally {

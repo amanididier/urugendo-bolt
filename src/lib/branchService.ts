@@ -48,17 +48,49 @@ export async function fetchAgencyBranches(): Promise<BranchRecord[]> {
 }
 
 /**
- * Fetch dynamic revenue for a specific branch ID by checking real transaction logs
+ * Fetch real revenue for a specific branch and time period by aggregating
+ * paid bookings. Used by both the manager dashboard (all branches) and the
+ * agency dashboard (own branch only).
+ *
+ * A booking counts as "real money" if EITHER:
+ *   - payment_status = 'verified'  (agent confirmed the MoMo receipt — Batch 4)
+ *   - status        = 'confirmed' (legacy path, no payment_status column)
+ *
+ * This dual-criterion query survives the partial migration where some
+ * bookings were confirmed before the Batch 4 payment_status column was
+ * backfilled.
+ *
+ * @param branchId  - branches.id of the target branch
+ * @param period    - "today" | "monthly" | "yearly"
+ * @param now       - optional Date used as the reference point (defaults to now).
+ *                    Pass a fixed Date in tests to avoid clock skew.
  */
 export async function fetchBranchRevenue(
   branchId: string,
+  period: "today" | "monthly" | "yearly" = "today",
+  now: Date = new Date(),
 ): Promise<PeriodStats> {
+  const start = new Date(now);
+
+  if (period === "today") {
+    start.setHours(0, 0, 0, 0);
+  } else if (period === "monthly") {
+    start.setDate(1);
+    start.setHours(0, 0, 0, 0);
+  } else if (period === "yearly") {
+    start.setMonth(0, 1);
+    start.setHours(0, 0, 0, 0);
+  }
+
   try {
-    // Query actual bookings/transactions table linked to branch_id if available
+    // Batch 5: count both new (payment_status='verified') and legacy
+    // (status='confirmed') paths so revenue is correct in mixed-state data.
     const { data, error } = await supabase
       .from("bookings")
-      .select("fare_amount, created_at")
-      .eq("branch_id", branchId);
+      .select("fare_amount, created_at, status, payment_status")
+      .eq("branch_id", branchId)
+      .gte("created_at", start.toISOString())
+      .or("payment_status.eq.verified,status.eq.confirmed");
 
     if (error || !data) {
       return { passengers: 0, revenue: 0 };

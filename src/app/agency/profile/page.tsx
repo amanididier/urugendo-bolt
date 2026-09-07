@@ -33,6 +33,8 @@ export default function AgentProfilePage() {
   const [agencyName, setAgencyName] = useState("");
   const [branchName, setBranchName] = useState("");
   const [momoCode, setMomoCode] = useState("5129401");
+  // Batch 3: real branch contact phone loaded from branches.phone
+  const [branchPhone, setBranchPhone] = useState("0796919900");
 
   // Notifications
   const [unreadNotificationsCount] = useState(3);
@@ -109,18 +111,21 @@ export default function AgentProfilePage() {
 
       const currentBranch = resolvedBranch || branchName || "Musanze";
 
-      // Fetch live branch MoMo code matching agent's current station
+      // Fetch live branch MoMo code AND contact phone matching agent's current station
       try {
         const { data: bData } = await supabase
           .from("branches")
-          .select("momo_code")
+          .select("momo_code, phone")
           .ilike("name", `%${currentBranch}%`)
           .single();
 
         if (bData?.momo_code) {
           setMomoCode(bData.momo_code);
           localStorage.setItem("urugendo_branch_momo", bData.momo_code);
-          return;
+        }
+        // Batch 3: load real branch phone from the branches record.
+        if (bData?.phone) {
+          setBranchPhone(bData.phone);
         }
       } catch {
         // Fall back to localized memory
@@ -353,7 +358,7 @@ export default function AgentProfilePage() {
 
             <div className="space-y-3">
               <a
-                href="tel:0796919900"
+                href={`tel:${branchPhone}`}
                 className="w-full bg-slate-100 hover:bg-slate-200 p-3 rounded-xl flex items-center gap-3 transition-colors cursor-pointer"
               >
                 <div className="w-9 h-9 rounded-lg bg-[#00B14F] text-white flex items-center justify-center">
@@ -361,16 +366,16 @@ export default function AgentProfilePage() {
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-500 font-bold uppercase block">
-                    Call Center Phone
+                    Branch Contact Phone
                   </span>
                   <span className="text-xs font-black text-slate-900 font-mono">
-                    0796919900
+                    {branchPhone}
                   </span>
                 </div>
               </a>
 
               <a
-                href="https://wa.me/250796919900"
+                href={`https://wa.me/${branchPhone.replace(/\D/g, "")}`}
                 target="_blank"
                 rel="noreferrer"
                 className="w-full bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 p-3 rounded-xl flex items-center gap-3 transition-colors cursor-pointer"
@@ -380,7 +385,7 @@ export default function AgentProfilePage() {
                 </div>
                 <div>
                   <span className="text-[10px] text-emerald-700 font-bold uppercase block">
-                    WhatsApp Support
+                    WhatsApp Branch
                   </span>
                   <span className="text-xs font-black text-emerald-900">
                     Chat on WhatsApp

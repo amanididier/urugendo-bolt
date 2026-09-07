@@ -125,22 +125,19 @@ export default function SeatSelectionPage() {
     if (status === "taken") return;
 
     if (selectedSeats.includes(seatId)) {
+      // Deselect — always allowed regardless of cap.
       const updated = selectedSeats.filter((s) => s !== seatId);
       setSelectedSeats(updated);
       setSelectedSeat(updated[0] || null);
     } else {
-      if (
-        selectedSeats.length >= requiredSeatsCount &&
-        requiredSeatsCount > 1
-      ) {
-        const updated = [...selectedSeats.slice(1), seatId];
-        setSelectedSeats(updated);
-        setSelectedSeat(updated[0] || null);
-      } else {
-        const updated = [...selectedSeats, seatId];
-        setSelectedSeats(updated);
-        setSelectedSeat(updated[0] || null);
+      // Batch 3: hard-cap at requiredSeatsCount. If already at cap, ignore
+      // the click so a user searching for 1 passenger can never select 2+.
+      if (selectedSeats.length >= requiredSeatsCount) {
+        return;
       }
+      const updated = [...selectedSeats, seatId];
+      setSelectedSeats(updated);
+      setSelectedSeat(updated[0] || null);
     }
   };
 

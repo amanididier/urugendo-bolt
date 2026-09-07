@@ -24,6 +24,8 @@ import {
   decrementAvailableSeats,
   normalizePhone,
 } from "@/lib/api";
+import { markPaymentSubmitted } from "@/lib/paymentProvider";
+import { notifyUser } from "@/lib/notificationsService";
 import { supabase } from "@/lib/supabase";
 import { t } from "@/lib/translations";
 
@@ -146,43 +148,6 @@ export default function PaymentPage() {
       ? selectedTrip.operator
       : "Bus Operator");
 
-  const functionUrl = `${
-    process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL
-  }/functions/v1/mtn-payment`;
-
-  const pollPaymentStatus = async (refId: string): Promise<boolean> => {
-    let attempts = 0;
-    const maxAttempts = 30;
-    while (attempts < maxAttempts) {
-      await new Promise((r) => setTimeout(r, 3000));
-      try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        const res = await fetch(
-          `${functionUrl}?action=status&referenceId=${refId}`,
-          {
-            headers: {
-              Authorization: `Bearer ${session?.access_token || ""}`,
-              apikey:
-                process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-                process.env.VITE_SUPABASE_ANON_KEY ||
-                "",
-            },
-          },
-        );
-        if (!res.ok) continue;
-        const data = await res.json();
-        if (data.status === "success") return true;
-        if (data.status === "failed") return false;
-      } catch {
-        // network hiccup, keep polling
-      }
-      attempts++;
-    }
-    return false;
-  };
-
   const handlePay = async () => {
     setError("");
     const cleanPhone = normalizePhone(phone);
@@ -199,77 +164,74 @@ export default function PaymentPage() {
 
     setState("initiating");
 
+    // Batch 4: semi-automated USSD flow.
+    // The user has already paid via *182# to the branch's MoMo code shown
+    // on this page. We do NOT call any live MTN/Airtel Edge Function —
+    // we just create the booking row with status='pending' and
+    // payment_status='submitted', and the station agent verifies the
+    // MoMo SMS receipt from their dashboard.
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const token = session?.access_token || "";
-      const anonKey =
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-        process.env.VITE_SUPABASE_ANON_KEY ||
-        "";
+      const shortCode = generateShortCode();
+      const bookingPayload = {
+        trip: selectedTrip,
+        seat: selectedSeat,
+        passengerName: editablePassengerName,
+        passengerPhone: cleanPhone,
+        momoName: momoName,
+        momoNumber: cleanPhone,
+        shortCode,
+        paymentMethod: "MTN MoMo",
+        totalAmount: total,
+        bookingFee,
+        status: "pending",
+        bookingDate: new Date().toISOString().split("T")[0],
+        groupPassengers: groupPassengers,
+      };
 
-      const res = await fetch(functionUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          apikey: anonKey,
-        },
-        body: JSON.stringify({
-          bookingId: selectedTrip.id,
-          amount: total,
-          phone: cleanPhone,
-          currency: "RWF",
-        }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Payment request failed");
-      }
-
-      const data = await res.json();
-      setReferenceId(data.referenceId);
-      setState("awaiting_approval");
-
-      setState("polling");
-      const success = await pollPaymentStatus(data.referenceId);
-
-      if (success) {
-        const shortCode = generateShortCode();
-        const bookingPayload = {
-          trip: selectedTrip,
-          seat: selectedSeat,
-          passengerName: editablePassengerName,
-          passengerPhone: cleanPhone,
-          momoName: momoName,
-          momoNumber: cleanPhone,
-          shortCode,
-          paymentMethod: "MTN MoMo",
-          totalAmount: total,
-          bookingFee,
-          status: "pending",
-          bookingDate: new Date().toISOString().split("T")[0],
-          groupPassengers: groupPassengers,
-        };
-
-        const localBookingId = addBooking(bookingPayload);
-        const dbBookingId = await createBooking(bookingPayload);
-        await decrementAvailableSeats(selectedTrip.id);
-
-        setState("success");
-        setVerificationPopup(true);
-
-        const navigateId = dbBookingId || localBookingId;
-        setTimeout(() => {
-          setVerificationPopup(false);
-          router.push(`/tickets?pending=true&id=${navigateId}`);
-        }, 3000);
-      } else {
+      const localBookingId = addBooking(bookingPayload);
+      const dbResult = await createBooking(bookingPayload);
+      if (dbResult.error === "SIGN_IN_REQUIRED") {
         setState("failed");
-        setError("Payment was not approved or timed out. Please try again.");
+        setError("Please sign in to confirm your booking.");
+        setTimeout(() => {
+          router.push("/user-login?redirect=/payment");
+        }, 1500);
+        return;
       }
+      const dbBookingId = dbResult.id;
+      await decrementAvailableSeats(selectedTrip.id);
+
+      // Flip the booking's payment_status to 'submitted' so the agent's
+      // "Verify" tab picks it up. Idempotent — safe if status is already
+      // 'pending' from createBooking.
+      if (dbBookingId) {
+        await markPaymentSubmitted(dbBookingId);
+      }
+
+      setReferenceId(shortCode);
+      setState("success");
+      setVerificationPopup(true);
+
+      // Batch 4: notify the passenger that their MoMo payment was received
+      // and the ticket is awaiting agent verification (not yet confirmed).
+      const { data: authData } = await supabase.auth.getUser();
+      if (authData.user && dbBookingId) {
+        const route = `${selectedTrip.from} → ${selectedTrip.to}`;
+        const date = new Date(selectedTrip.date || Date.now()).toLocaleDateString();
+        notifyUser({
+          userId: authData.user.id,
+          title: "⏳ Awaiting Verification",
+          message: `Your MoMo payment for the ${route} trip on ${date} was received. The ${operatorName} agent will verify and confirm your ticket (Code: ${shortCode}) shortly.`,
+          type: "booking",
+          actionUrl: `/ticket/${dbBookingId}`,
+        });
+      }
+
+      const navigateId = dbBookingId || localBookingId;
+      setTimeout(() => {
+        setVerificationPopup(false);
+        router.push(`/tickets?pending=true&id=${navigateId}`);
+      }, 3000);
     } catch (err) {
       setState("failed");
       setError(err instanceof Error ? err.message : "Payment failed");
@@ -768,8 +730,8 @@ export default function PaymentPage() {
             <>
               <Loader2 size={18} className="animate-spin" />
               {language === "RW"
-                ? "Tegereza kwemeza"
-                : "Waiting for verification"}
+                ? "Birimo gukorwa..."
+                : "Processing..."}
             </>
           )}
           {state === "success" && (

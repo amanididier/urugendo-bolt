@@ -27,10 +27,13 @@ import {
   CheckCheck,
 } from "lucide-react";
 import { fetchBookingById } from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 import type { Booking } from "@/lib/types";
 
 // Default Agency Contact Fallbacks
-const DEFAULT_PHONE = "+250782490611";
+// Batch 3: placeholder phone shown briefly while the real branch phone loads.
+// The loadTicket effect queries branches.phone via the booking's branchId FK.
+const DEFAULT_PHONE = "+250 000 000 000";
 
 // Multilingual Translations Dictionary
 const translations = {
@@ -204,13 +207,16 @@ export default function TicketDetailPage() {
         if (found) {
           setBooking(found);
 
-          if (typeof window !== "undefined" && found.trip?.from) {
-            const cityName = found.trip.from.toLowerCase();
-            const storedPhone = localStorage.getItem(
-              `branch_phone_city_${cityName}`,
-            );
-            if (storedPhone) {
-              setDynamicBranchPhone(storedPhone);
+          // Batch 3: look up real branch phone from the branches table.
+          // booking.branchId is populated by formatBookingData in api.ts.
+          if (found.branchId && typeof window !== "undefined") {
+            const { data: branch } = await supabase
+              .from("branches")
+              .select("phone")
+              .eq("id", found.branchId)
+              .maybeSingle();
+            if (branch?.phone) {
+              setDynamicBranchPhone(branch.phone);
             }
           }
         }

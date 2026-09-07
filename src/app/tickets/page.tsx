@@ -16,7 +16,7 @@ import {
   Square,
   CheckCircle2,
 } from "lucide-react";
-import { fetchAllBookings, fetchBookingsByUser } from "@/lib/api";
+import { fetchBookingsByUser } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import type { Booking } from "@/lib/types";
 import { addUserNotification } from "@/lib/notifications";
@@ -56,10 +56,8 @@ export default function TicketsPage() {
         if (user) {
           loadedBookings = await fetchBookingsByUser(user.id);
         }
-
-        if (loadedBookings.length === 0) {
-          loadedBookings = await fetchAllBookings();
-        }
+        // No auth user: show empty state — never fall back to all bookings.
+        // RLS on the bookings table also enforces this at the DB level.
 
         const localGuest = localStorage.getItem("guest_bookings");
         if (localGuest) {

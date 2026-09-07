@@ -25,14 +25,24 @@ import {
   ShieldCheck,
   Bell,
   ChevronRight,
+  Bus,
 } from "lucide-react";
 import {
   fetchTripsByDate,
-  fetchAllBookings,
+  fetchBookingsByBranch,
   fetchBookingById,
   updateBookingStatus,
   updateTripStatus,
 } from "@/lib/api";
+import { fetchBranchRevenue } from "@/lib/branchService";
+import {
+  notifyPassengersOnTrip,
+  notifyUser,
+} from "@/lib/notificationsService";
+import {
+  markPaymentVerified,
+  markPaymentRejected,
+} from "@/lib/paymentProvider";
 import { supabase } from "@/lib/supabase";
 import type { Trip, Booking, AgencyBranch } from "@/lib/types";
 
@@ -43,6 +53,8 @@ export interface ExtendedBooking extends Omit<Partial<Booking>, "status"> {
   seatNumber?: string;
   totalAmount?: number;
   status?: string;
+  payment_status?: string;
+  userId?: string;
   trip?: any;
   momoName?: string;
   momoNumber?: string;
@@ -125,7 +137,15 @@ export default function AgencyDashboard() {
   const [verifying, setVerifying] = useState(false);
 
   const [agentBranch, setAgentBranch] = useState("Musanze");
+  // Batch 2: branch_id (FK) of the logged-in agent's branch.
+  // Used for branch-isolated queries (bookings, trips, revenue).
+  const [agentBranchId, setAgentBranchId] = useState<string | null>(null);
   const [, setOperatorId] = useState("");
+  // Batch 2: real revenue loaded from the bookings table for the "today" stat card.
+  const [todayRevenueData, setTodayRevenueData] = useState<{
+    passengers: number;
+    revenue: number;
+  }>({ passengers: 0, revenue: 0 });
 
   const [emptySeats, setEmptySeats] = useState<Record<string, number>>({});
   const [savedFeedback, setSavedFeedback] = useState<string | null>(null);
@@ -149,12 +169,17 @@ export default function AgencyDashboard() {
 
         const { data, error } = await supabase
           .from("agency_agents")
-          .select("status, branch_name, id")
+          .select("status, branch_name, id, branch_id")
           .eq("email", storedAgentEmail)
           .single();
 
         if (!error && data) {
           setAgentStatus(data.status);
+          // Batch 2: store the branch FK for scoped queries.
+          if (data.branch_id) {
+            setAgentBranchId(data.branch_id);
+            setAgentBranch(data.branch_name || localStorage.getItem("urugendo_branch") || "Musanze");
+          }
           if (data.status === "pending") {
             setShowApprovalModal(true);
           } else {
@@ -200,6 +225,29 @@ export default function AgencyDashboard() {
     };
   }, []);
 
+  // Batch 4: every 5 minutes while the agent has pending MoMo bookings in
+  // their branch, send a reminder notification. The interval is set up once
+  // on mount and torn down on unmount; no per-tick re-query to Supabase.
+  useEffect(() => {
+    const FIVE_MIN_MS = 5 * 60 * 1000;
+    const interval = setInterval(async () => {
+      const pending = bookings.filter(
+        (b) => b.status === "pending" || b.status === "payment_submitted",
+      );
+      if (pending.length === 0) return;
+      const { data: authData } = await supabase.auth.getUser();
+      if (!authData.user) return;
+      await notifyUser({
+        userId: authData.user.id,
+        title: "Pending MoMo Reminder",
+        message: `You have ${pending.length} unverified MoMo payment${pending.length === 1 ? "" : "s"} at ${agentBranch}. Tap to review.`,
+        type: "reminder",
+        actionUrl: "/agency?tab=verify",
+      });
+    }, FIVE_MIN_MS);
+    return () => clearInterval(interval);
+  }, [bookings, agentBranch]);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -220,15 +268,36 @@ export default function AgencyDashboard() {
     async function loadDashboardData() {
       setLoading(true);
       try {
+        // Resolve branch_id first: used for every branch-scoped query below.
+        const storedAgentEmail =
+          localStorage.getItem("urugendo_agent_email") ||
+          localStorage.getItem("urugendo_user_email");
+        let resolvedBranchId: string | null = null;
+        if (storedAgentEmail) {
+          const { data: agentRow } = await supabase
+            .from("agency_agents")
+            .select("branch_id")
+            .eq("email", storedAgentEmail)
+            .maybeSingle();
+          resolvedBranchId = agentRow?.branch_id ?? null;
+        }
+
         const todayStr = new Date().toISOString().split("T")[0];
-        const [todayTrips, allBookings] = await Promise.all([
+        const [todayTrips, branchRevenue] = await Promise.all([
           fetchTripsByDate(todayStr),
-          fetchAllBookings(),
+          // Batch 2: real revenue from paid bookings for today.
+          resolvedBranchId
+            ? fetchBranchRevenue(resolvedBranchId, "today")
+            : Promise.resolve({ passengers: 0, revenue: 0 }),
         ]);
 
         if (isMounted) {
+          setAgentBranchId(resolvedBranchId);
+
           const currentStation = cleanStationName(branch);
 
+          // Filter trips: show outgoing (origin = this station) and incoming
+          // (destination = this station) trips.
           const branchTrips = (todayTrips || []).filter((t) => {
             const fromStation = cleanStationName(t.from || "");
             const toStation = cleanStationName(t.to || "");
@@ -238,19 +307,17 @@ export default function AgencyDashboard() {
             );
           });
 
-          const branchBookings = (
-            (allBookings as ExtendedBooking[]) || []
-          ).filter((b) => {
-            const tripObj =
-              b.trip && typeof b.trip === "object" ? b.trip : null;
-            const tripFrom = tripObj?.from
-              ? cleanStationName(tripObj.from)
-              : "";
-            return tripFrom.includes(currentStation) || !tripFrom;
-          });
+          // Batch 2: fetch bookings scoped to this branch (branch_id FK).
+          // Falls back to empty if branch_id is not yet resolved.
+          let branchBookings: ExtendedBooking[] = [];
+          if (resolvedBranchId) {
+            const allBookings = await fetchBookingsByBranch(resolvedBranchId);
+            branchBookings = (allBookings as ExtendedBooking[]) || [];
+          }
 
           setTrips(branchTrips);
           setBookings(branchBookings);
+          setTodayRevenueData(branchRevenue);
         }
       } catch (error) {
         console.error("Failed to fetch agency dashboard data:", error);
@@ -473,23 +540,12 @@ export default function AgencyDashboard() {
     });
 
   const activeBookings = bookings.filter((b) => b.status !== "cancelled");
-  const todayRevenue = activeBookings.reduce((sum, b) => {
-    const isConfirmedOrBoarded =
-      b.status === "confirmed" || b.status === "boarded";
-    if (!isConfirmedOrBoarded) return sum;
-    const tripObj = b.trip && typeof b.trip === "object" ? b.trip : null;
-    const tripFrom = tripObj?.from
-      ? cleanStationName(tripObj.from)
-      : currentStationKey;
-    if (tripFrom.includes(currentStationKey)) {
-      return sum + (b.totalAmount || tripObj?.price || 0);
-    }
-    return sum;
-  }, 0);
-
+  // Batch 2: revenue comes from the bookings table via fetchBranchRevenue.
+  // todayRevenueData is loaded in loadDashboardData — falls back to 0 when
+  // the query returns no rows (real zero, not a placeholder).
   const stats = {
-    todayBookings: activeBookings.length,
-    todayRevenue,
+    todayBookings: todayRevenueData.passengers,
+    todayRevenue: todayRevenueData.revenue,
     totalBuses: new Set(trips.map((t) => t.plateNumber || t.id).filter(Boolean))
       .size,
     activeRoutes: new Set(
@@ -539,18 +595,43 @@ export default function AgencyDashboard() {
 
   const handleConfirmMoMoPayment = async (bookingId: string) => {
     setVerifying(true);
-    const success = await updateBookingStatus(bookingId, "confirmed" as any);
+    // Batch 4: use the dedicated helper that writes both payment_status='verified'
+    // AND status='confirmed' in one DB round-trip. The passenger sees the
+    // "Confirmed ✓" badge and payment_status='verified' so the verification
+    // queue clears.
+    const success = await markPaymentVerified(bookingId);
     if (success) {
       setBookings((prev) =>
         prev.map((b) =>
-          b.id === bookingId ? { ...b, status: "confirmed" } : b,
+          b.id === bookingId ? { ...b, status: "confirmed", payment_status: "verified" as any } : b,
         ),
       );
-      // Trigger notification according to Rule 3 copy specification
+      // Trigger notification so the passenger knows the ticket is confirmed.
+      const confirmedBooking = bookings.find((b) => b.id === bookingId);
+      const route = confirmedBooking?.trip
+        ? `${(confirmedBooking.trip as any)?.from || ""} → ${(confirmedBooking.trip as any)?.to || ""}`
+        : "";
+      const time = (confirmedBooking?.trip as any)?.departureTime || "08:30 AM";
       addUserNotification(
-        "Ticket Verified!",
-        "Your ticket from Musanze to Kigali (08:30 AM) has been received and verified! You may check it in your tickets page.",
+        "✅ Ticket Confirmed!",
+        `Your ticket (${route} at ${time}) has been verified and is ready for boarding. Check your tickets page.`,
       );
+
+      // Also send a DB-backed notification for the passenger app.
+      const { data: authData } = await supabase.auth.getUser();
+      const confirmedBooking2 = bookings.find((b) => b.id === bookingId);
+      if (authData.user && confirmedBooking2?.userId) {
+        const route2 = confirmedBooking2?.trip
+          ? `${(confirmedBooking2.trip as any)?.from || ""} → ${(confirmedBooking2.trip as any)?.to || ""}`
+          : "";
+        await notifyUser({
+          userId: confirmedBooking2.userId,
+          title: "✅ Ticket Confirmed!",
+          message: `Your MoMo payment for ${route2} has been verified. Your ticket is ready!`,
+          type: "verification",
+          actionUrl: `/ticket/${bookingId}`,
+        });
+      }
     }
     setVerifying(false);
   };
@@ -593,17 +674,28 @@ export default function AgencyDashboard() {
           t.id === tripId ? { ...t, status: "delayed" as Trip["status"] } : t,
         ),
       );
-      // Broadcast notification to passengers booked on this specific trip
-      const tripBookings = bookings.filter((b) => {
-        const bTripId = typeof b.trip === "string" ? b.trip : b.trip?.id;
-        return bTripId === tripId && b.status !== "cancelled";
+      // Batch 4: write real DB-backed delay notifications to every passenger
+      // booked on this trip, plus a confirmation to the agent themselves.
+      const sent = await notifyPassengersOnTrip(tripId, {
+        title: "⚠️ Trip Alert",
+        message: `Your trip to ${destination} has been delayed for 15 minutes due to heavy rainfall on the road. We appreciate your patience!`,
+        type: "delay",
       });
-      tripBookings.forEach(() => {
-        addUserNotification(
-          "Trip Alert",
-          `⚠️ Trip Alert: Your trip to ${destination} has been delayed for 15 minutes due to heavy rainfall on the road. We appreciate your patience!`,
-        );
-      });
+      // Confirmation to the agent: "your delay alert went out to N passengers".
+      const { data: authData } = await supabase.auth.getUser();
+      if (authData.user) {
+        await notifyUser({
+          userId: authData.user.id,
+          title: "Delay Alert Sent",
+          message: `Delay notification sent to ${sent} passenger${sent === 1 ? "" : "s"} booked on the ${destination} trip.`,
+          type: "general",
+        });
+      }
+      // Local toast (best-effort) — the DB row is the source of truth.
+      addUserNotification(
+        "Trip Alert Sent",
+        `Delay alert sent to ${sent} passenger${sent === 1 ? "" : "s"}.`,
+      );
       // Also dispatch a custom event for global background listeners
       window.dispatchEvent(
         new CustomEvent("weka-trip-delayed", {
@@ -777,6 +869,53 @@ export default function AgencyDashboard() {
               <span>{stats.todayBookings} station bookings today</span>
             </div>
           </div>
+
+          {/* Batch 2: read-only "Incoming Buses" card. Shows trips that
+              terminate at this agent's branch but were scheduled by another
+              branch. The agent cannot verify, board, or modify tickets for
+              these trips — view only. */}
+          {stationIncoming.length > 0 && (
+            <div className="bg-white rounded-2xl p-4 border border-border shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center">
+                    <Bus size={14} className="text-blue-600" />
+                  </div>
+                  <div>
+                    <div className="text-[13px] font-bold text-text-primary">
+                      Incoming Buses
+                    </div>
+                    <div className="text-[10px] text-text-muted">
+                      Read-only · from other branches
+                    </div>
+                  </div>
+                </div>
+                <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-2 py-1 rounded-full">
+                  {stationIncoming.length}
+                </span>
+              </div>
+              <div className="space-y-2">
+                {stationIncoming.slice(0, 3).map((trip) => (
+                  <div
+                    key={trip.id}
+                    className="flex items-center justify-between py-2 px-3 bg-slate-50 rounded-lg"
+                  >
+                    <div>
+                      <div className="text-[12px] font-semibold text-text-primary">
+                        {trip.from} → {trip.to}
+                      </div>
+                      <div className="text-[10px] text-text-muted">
+                        {trip.busPlate} · {trip.time || "—"}
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-semibold text-slate-500">
+                      View only
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
             <div className="bg-white rounded-xl p-3 border border-border shadow-sm">

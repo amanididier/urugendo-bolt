@@ -1,10 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "./supabase";
 import type { Trip, Booking } from "./types";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // Normalize phone numbers for MTN MoMo payments (Rwanda format handling)
 export function normalizePhone(phone: string): string | null {
@@ -272,7 +267,9 @@ export async function createTrip(
   }
 }
 
-// Create a booking in Supabase DB from the payment flow
+// Create a booking in Supabase DB from the payment flow.
+// Attaches auth.uid() as user_id — returns { id, error } so callers can
+// distinguish "not signed in" from "db error".
 export async function createBooking(bookingData: {
   trip: Trip;
   seat: string;
@@ -284,12 +281,25 @@ export async function createBooking(bookingData: {
   bookingFee?: number;
   status: string;
   bookingDate: string;
-}): Promise<string | null> {
+  momoName?: string; // The MoMo account holder name
+  momoNumber?: string; // The MoMo number used for payment
+}): Promise<{ id: string | null; error?: string }> {
   try {
+    const { data: authData } = await supabase.auth.getUser();
+    if (!authData.user) {
+      return { id: null, error: "SIGN_IN_REQUIRED" };
+    }
+
     const isUuid =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
         bookingData.seat,
       );
+
+    // Map our internal status names to what the DB allows.
+    // 'pending' / 'payment_submitted' → stored as-is (DB allows these per Batch 4 migration).
+    // 'upcoming' / 'active' → store as 'active' for backward compat.
+    const resolvedStatus =
+      bookingData.status === "upcoming" ? "active" : bookingData.status;
 
     const { data, error } = await supabase
       .from("bookings")
@@ -301,9 +311,16 @@ export async function createBooking(bookingData: {
           passenger_name: bookingData.passengerName,
           passenger_phone: bookingData.passengerPhone,
           booking_code: bookingData.shortCode,
-          status:
-            bookingData.status === "upcoming" ? "active" : bookingData.status,
+          user_id: authData.user.id,
+          status: resolvedStatus,
           booking_date: bookingData.bookingDate,
+          // Batch 4: store MoMo details so the agent's "Verify" tab shows
+          // the name and number from the payment form.
+          momo_name: bookingData.momoName || null,
+          momo_number: bookingData.momoNumber || null,
+          // Default: payment submitted (the user already sent the MoMo).
+          // The agent will flip this to 'verified' or 'failed' after checking.
+          payment_status: "submitted",
         },
       ])
       .select("id")
@@ -311,13 +328,13 @@ export async function createBooking(bookingData: {
 
     if (error || !data) {
       console.error("Error creating booking in DB:", error?.message || error);
-      return null;
+      return { id: null, error: error?.message || "DB_ERROR" };
     }
 
-    return data.id;
+    return { id: data.id };
   } catch (err) {
     console.error("Unexpected error in createBooking:", err);
-    return null;
+    return { id: null, error: "UNEXPECTED_ERROR" };
   }
 }
 
@@ -405,6 +422,40 @@ export async function fetchBookingById(
   } catch (err) {
     console.error("Error in fetchBookingById:", err);
     return null;
+  }
+}
+
+// Fetch all bookings scoped to a specific branch.
+// Used by the agency dashboard and manifest views.
+// Batch 2: replaces the un-scoped fetchAllBookings() call.
+export async function fetchBookingsByBranch(
+  branchId: string,
+): Promise<Booking[]> {
+  try {
+    const { data, error } = await supabase
+      .from("bookings")
+      .select(
+        `
+        *,
+        trip:trips(
+          *,
+          operator:operators(*)
+        )
+      `,
+      )
+      .eq("branch_id", branchId)
+      .order("created_at", { ascending: false });
+
+    if (error || !data) {
+      if (error)
+        console.error("Error fetching branch bookings:", error.message || error);
+      return [];
+    }
+
+    return data.map(formatBookingData);
+  } catch (err) {
+    console.error("Error fetching branch bookings:", err);
+    return [];
   }
 }
 
@@ -543,17 +594,25 @@ function formatBookingData(b: any): Booking {
     shortCode: b.booking_code || b.short_code || b.id?.slice(0, 8),
     passengerName: b.passenger_name || "Passenger",
     passengerPhone: b.passenger_phone || "",
-    momoAccountName: b.momo_account_name,
-    momoPhoneNumber: b.momo_phone_number,
+    momoAccountName: b.momo_name || b.momo_account_name,
+    momoPhoneNumber: b.momo_number || b.momo_phone_number,
     paymentTime: b.payment_time || b.created_at,
     seat: b.seat_id || b.seat_label || "1A",
     paymentMethod: "MTN Mobile Money",
     totalAmount: b.trip?.price || 2500,
+    // Batch 4: expose status and payment_status for the verification workflow.
+    // status: booking lifecycle (pending → confirmed → boarded / rejected).
+    // payment_status: MoMo receipt state (submitted → verified / failed).
     status: b.status || "active",
+    payment_status: b.payment_status || "unpaid",
     bookingDate:
       b.booking_date ||
       b.created_at?.split("T")[0] ||
       new Date().toISOString().split("T")[0],
+    // Batch 3: expose the booking's branch FK so the ticket page can
+    // look up branches.phone without re-deriving from city name.
+    branchId: b.branch_id || null,
+    userId: b.user_id || null,
     trip: {
       id: b.trip?.id || "trip-1",
       operator: {

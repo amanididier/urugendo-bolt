@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -9,17 +9,14 @@ import {
   UserCheck,
   User,
   TrendingUp,
-  CreditCard,
   Download,
   CheckCircle2,
   Bell,
   Lock,
   Globe,
-  Phone,
   LogOut,
   ChevronRight,
   ShieldCheck,
-  Edit3,
   Calendar,
   X,
   DollarSign,
@@ -34,9 +31,15 @@ import { supabase } from "@/lib/supabase";
 import {
   fetchAgencyBranches,
   createNewBranch,
+  fetchBranchRevenue,
   BranchRecord,
   PeriodStats,
 } from "@/lib/branchService";
+import {
+  getStoredManager,
+  clearManagerSession,
+  getStoredManagerId,
+} from "@/lib/managerAuth";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -45,6 +48,7 @@ import {
 type TimePeriod = "today" | "monthly" | "yearly" | "custom";
 type Tab = "home" | "branches" | "profile";
 
+// Agent record as stored in the DB
 interface PendingAgent {
   id: string;
   name: string;
@@ -54,75 +58,14 @@ interface PendingAgent {
   signedUpAt: string;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Config / Seed Data Fallbacks                                       */
-/* ------------------------------------------------------------------ */
-
-const SUPPORT_PHONE = "0796919900";
-
-const SEED_BRANCHES: BranchRecord[] = [
-  {
-    id: "br-1",
-    name: "Nyabugogo Main Terminal",
-    location: "Kigali",
-    momoCode: "8291034",
-    phone: "+250782490611",
-    agentName: "Jean Paul N.",
-    agentEmail: "jp.n@virunga.rw",
-    stats: {
-      today: { passengers: 42, revenue: 147000 },
-      monthly: { passengers: 1240, revenue: 4340000 },
-      yearly: { passengers: 14100, revenue: 49350000 },
-    },
-  },
-  {
-    id: "br-2",
-    name: "Musanze Central Branch",
-    location: "Musanze",
-    momoCode: "5129401",
-    phone: "+250788112233",
-    agentName: "Marie Rose M.",
-    agentEmail: "m.rose@virunga.rw",
-    stats: {
-      today: { passengers: 31, revenue: 108500 },
-      monthly: { passengers: 890, revenue: 3115000 },
-      yearly: { passengers: 10230, revenue: 35805000 },
-    },
-  },
-  {
-    id: "br-3",
-    name: "Rubavu Terminal",
-    location: "Rubavu",
-    momoCode: "9041285",
-    phone: "+250785445566",
-    agentName: "Bosco Habimana",
-    agentEmail: "bosco.h@virunga.rw",
-    stats: {
-      today: { passengers: 19, revenue: 66500 },
-      monthly: { passengers: 620, revenue: 2170000 },
-      yearly: { passengers: 7140, revenue: 24990000 },
-    },
-  },
-];
-
-const SEED_PENDING_AGENTS: PendingAgent[] = [
-  {
-    id: "ag-1",
-    name: "Eric Hakizimana",
-    email: "eric.h@virunga.rw",
-    branchName: "Musanze Terminal",
-    phone: "+250 788 112 233",
-    signedUpAt: "10 mins ago",
-  },
-  {
-    id: "ag-2",
-    name: "Clarisse Umutoni",
-    email: "clarisse.u@virunga.rw",
-    branchName: "Nyabugogo Branch B",
-    phone: "+250 785 445 566",
-    signedUpAt: "2 hours ago",
-  },
-];
+// Logged-in manager session
+interface ManagerSession {
+  id: string;
+  name: string;
+  email: string;
+  managerCode: string;
+  agencyName: string;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                             */
@@ -136,11 +79,6 @@ function formatCompact(n: number): string {
 
 function formatRwf(n: number): string {
   return `RWF ${n.toLocaleString()}`;
-}
-
-function getBranchStats(branch: BranchRecord, period: TimePeriod): PeriodStats {
-  if (period === "custom") return branch.stats.today;
-  return branch.stats[period] || { passengers: 0, revenue: 0 };
 }
 
 function periodLabel(period: TimePeriod, customDate: string): string {
@@ -160,6 +98,20 @@ function periodLabel(period: TimePeriod, customDate: string): string {
       });
     }
   }
+}
+
+function relativeTime(date: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return "Just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDays = Math.floor(diffHr / 24);
+  if (diffDays < 30) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
 }
 
 /* ------------------------------------------------------------------ */
@@ -244,127 +196,138 @@ function SectionHeader({
 export default function AgencyManagerApp() {
   const router = useRouter();
 
-  // Navigation State
+  // ── Session ──────────────────────────────────────────────────────────
+  const [session, setSession] = useState<ManagerSession | null>(null);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  // ── Navigation ────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [showPendingAgentsView, setShowPendingAgentsView] = useState(false);
 
-  // Time / Filtering State
+  // ── Time / Filtering ──────────────────────────────────────────────────
   const [selectedPeriod, setSelectedPeriod] = useState<TimePeriod>("today");
   const [customDate, setCustomDate] = useState<string>(
     new Date().toISOString().split("T")[0],
   );
 
-  // Authenticated Manager Session State
-  const [managerName, setManagerName] = useState("Amani Ishimwe Didier");
-  const [managerEmail, setManagerEmail] = useState("ishimweamanid@gmail.com");
-  const [agencyName, setAgencyName] = useState("Virunga Express");
+  // ── Data (always real — no seed fallbacks) ──────────────────────────
+  // Batch 5: starts empty; filled by loadData useEffect below.
+  const [branches, setBranches] = useState<BranchRecord[]>([]);
+  const [pendingAgents, setPendingAgents] = useState<PendingAgent[]>([]);
 
-  // App Data & Dynamic Revenue Tracking state using branchService
-  const [branches, setBranches] = useState<BranchRecord[]>(SEED_BRANCHES);
-  const [pendingAgents, setPendingAgents] =
-    useState<PendingAgent[]>(SEED_PENDING_AGENTS);
+  // Real period-keyed stats aggregated from the bookings table.
+  const [periodStats, setPeriodStats] = useState<
+    Record<string, PeriodStats>
+  >({});
 
-  // Apple UI Language Sheet State
-  const [language, setLanguage] = useState<"rw" | "en" | "fr">("rw");
-  const [showLanguageSheet, setShowLanguageSheet] = useState(false);
-
-  // Password Change Drawer State
-  const [showPasswordDrawer, setShowPasswordDrawer] = useState(false);
-  const [currentPasswordInput, setCurrentPasswordInput] = useState("");
-  const [newPasswordInput, setNewPasswordInput] = useState("");
-  const [passwordError, setPasswordError] = useState("");
-
-  // Branch Edit Modal State
+  // ── Branch form state ────────────────────────────────────────────────
   const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
-  const [newMomoInput, setNewMomoInput] = useState<string>("");
-  const [newPhoneInput, setNewPhoneInput] = useState<string>("");
-  const [momoError, setMomoError] = useState<string>("");
+  const [newMomoInput, setNewMomoInput] = useState("");
+  const [newPhoneInput, setNewPhoneInput] = useState("");
+  const [momoError, setMomoError] = useState("");
 
-  // New Branch Creation Form Modal State
   const [showAddBranchModal, setShowAddBranchModal] = useState(false);
   const [newBranchNameInput, setNewBranchNameInput] = useState("");
   const [newBranchLocationInput, setNewBranchLocationInput] = useState("");
   const [newBranchMomoInput, setNewBranchMomoInput] = useState("");
   const [newBranchPhoneInput, setNewBranchPhoneInput] = useState("");
-  const [newBranchAgentInput, setNewBranchAgentInput] = useState("");
   const [newBranchError, setNewBranchError] = useState("");
 
-  // Approval Loading State
+  // ── UI state ────────────────────────────────────────────────────────
   const [approvingId, setApprovingId] = useState<string | null>(null);
-
-  // Toast State
   const [toast, setToast] = useState<string | null>(null);
+  const [showPasswordDrawer, setShowPasswordDrawer] = useState(false);
+  const [currentPasswordInput, setCurrentPasswordInput] = useState("");
+  const [newPasswordInput, setNewPasswordInput] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [showLanguageSheet, setShowLanguageSheet] = useState(false);
+  const [language, setLanguage] = useState<"rw" | "en" | "fr">("rw");
+  const [toastVisible, setToastVisible] = useState(false);
+
+  // ── Toast helper ────────────────────────────────────────────────────
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setToastVisible(true);
+  }, []);
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 2800);
+    const t = setTimeout(() => {
+      setToast(null);
+      setToastVisible(false);
+    }, 2800);
     return () => clearTimeout(t);
   }, [toast]);
 
-  // Load Session & Fetch Live Database Data from Supabase via branchService
+  // ── Session guard ───────────────────────────────────────────────────
+  // Batch 5: redirect to login if no manager session is found.
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const storedName = localStorage.getItem("urugendo_manager_name");
-      const storedEmail = localStorage.getItem("urugendo_manager_email");
-      const storedAgency = localStorage.getItem("urugendo_agency");
-
-      if (storedName) setManagerName(storedName);
-      if (storedEmail) setManagerEmail(storedEmail);
-      if (storedAgency) setAgencyName(storedAgency);
+    const mgr = getStoredManager();
+    if (!mgr) {
+      router.replace("/agency/agency-login");
+      return;
     }
+    setSession(mgr as ManagerSession);
+    setCheckingSession(false);
+  }, [router]);
 
-    const loadData = async () => {
-      // Fetch dynamic branches using branchService
-      const dbBranches = await fetchAgencyBranches();
-      if (dbBranches && dbBranches.length > 0) {
-        setBranches(dbBranches);
+  // ── Load data from Supabase ────────────────────────────────────────
+  const loadData = useCallback(async () => {
+    // Fetch branches from DB
+    const dbBranches = await fetchAgencyBranches();
+    setBranches(dbBranches);
+
+    // Fetch unapproved agents from DB
+    try {
+      const { data: agentData, error: agentErr } = await supabase
+        .from("agency_agents")
+        .select("id, name, email, branch_name, phone, created_at")
+        .eq("is_approved", false)
+        .order("created_at", { ascending: false });
+
+      if (agentErr) {
+        console.warn("[manager] agents fetch error:", agentErr.message);
+        return;
       }
+      setPendingAgents(
+        (agentData || []).map((a: any) => ({
+          id: a.id,
+          name: a.name || "Agent",
+          email: a.email,
+          branchName: a.branch_name || "—",
+          phone: a.phone || "—",
+          signedUpAt: relativeTime(new Date(a.created_at)),
+        })),
+      );
+    } catch (err) {
+      console.warn("[manager] pending agents fetch error:", err);
+    }
+  }, []);
 
-      try {
-        const { data: agentData } = await supabase
-          .from("agency_agents")
-          .select("id, name, email, branch_name, phone, created_at")
-          .eq("is_approved", false);
-
-        if (agentData && agentData.length > 0) {
-          setPendingAgents(
-            agentData.map((a: any) => ({
-              id: a.id,
-              name: a.name || "Agent",
-              email: a.email,
-              branchName: a.branch_name || "Station",
-              phone: a.phone || "+250 780 000 000",
-              signedUpAt: new Date(a.created_at).toLocaleString(),
-            })),
-          );
-        }
-      } catch (err) {
-        console.warn("[manager] pending agents fetch error:", err);
-      }
-    };
-
+  useEffect(() => {
+    if (checkingSession) return;
     loadData();
 
-    // Setup real-time listener for new agent signups
+    // Real-time subscription: new agent signups appear instantly
     const channel = supabase
       .channel("manager-realtime-agents")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "agency_agents" },
-        (payload) => {
-          const newAgent = payload.new as any;
-          if (!newAgent) return;
+        (payload: any) => {
+          const newAgent = payload.new;
+          if (!newAgent || newAgent.is_approved === true) return;
           setPendingAgents((prev) => [
             {
               id: newAgent.id,
               name: newAgent.name || "New Agent",
               email: newAgent.email,
-              branchName: newAgent.branch_name || "Station",
-              phone: newAgent.phone || "+250 780 000 000",
+              branchName: newAgent.branch_name || "—",
+              phone: newAgent.phone || "—",
               signedUpAt: "Just now",
             },
             ...prev,
           ]);
-          setToast(`New agent signup alert: ${newAgent.name}`);
+          showToast(`New agent signup: ${newAgent.name}`);
         },
       )
       .subscribe();
@@ -372,18 +335,54 @@ export default function AgencyManagerApp() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [checkingSession, loadData, showToast]);
 
-  // Computed metrics (Dynamic Revenue Tracking across all active agency branches)
+  // ── Revenue stats (re-fetch when branches or period changes) ───────
+  const [statsLoading, setStatsLoading] = useState(false);
+
+  useEffect(() => {
+    if (branches.length === 0 || checkingSession) return;
+    let cancelled = false;
+    setStatsLoading(true);
+
+    const period =
+      selectedPeriod === "custom" ? "today" : (selectedPeriod as "today" | "monthly" | "yearly");
+
+    async function loadStats() {
+      const entries = await Promise.all(
+        branches.map(async (b) => {
+          const stats = await fetchBranchRevenue(b.id, period);
+          return [b.id, stats] as const;
+        }),
+      );
+      if (!cancelled) {
+        const map: Record<string, PeriodStats> = {};
+        for (const [id, stats] of entries) map[id] = stats;
+        setPeriodStats(map);
+        setStatsLoading(false);
+      }
+    }
+
+    loadStats();
+    return () => {
+      cancelled = true;
+    };
+  }, [branches, selectedPeriod, checkingSession]);
+
+  // ── Computed ───────────────────────────────────────────────────────
   const branchStats = branches.map((b) => ({
     branch: b,
-    stats: getBranchStats(b, selectedPeriod),
+    stats: periodStats[b.id] ?? { passengers: 0, revenue: 0 },
   }));
+
   const totalPassengers = branchStats.reduce(
     (acc, b) => acc + b.stats.passengers,
     0,
   );
-  const totalRevenue = branchStats.reduce((acc, b) => acc + b.stats.revenue, 0);
+  const totalRevenue = branchStats.reduce(
+    (acc, b) => acc + b.stats.revenue,
+    0,
+  );
   const topBranch = [...branchStats].sort(
     (a, b) => b.stats.revenue - a.stats.revenue,
   )[0];
@@ -395,26 +394,20 @@ export default function AgencyManagerApp() {
   const handleApproveAgent = async (agent: PendingAgent) => {
     setApprovingId(agent.id);
     try {
-      await supabase
+      const { error } = await supabase
         .from("agency_agents")
-        .update({ is_approved: true })
+        .update({ is_approved: true, status: "approved" })
         .eq("id", agent.id);
 
-      await fetch("/api/send-approval-email", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          agentEmail: agent.email,
-          agentName: agent.name,
-          loginUrl: `${window.location.origin}/agency/agency-login`,
-        }),
-      }).catch(() => null);
-    } catch (err) {
-      console.warn("[manager] approve agent error:", err);
+      if (error) {
+        console.warn("[manager] approve agent error:", error.message);
+        showToast(`Failed to approve ${agent.name}. Try again.`);
+      } else {
+        setPendingAgents((prev) => prev.filter((a) => a.id !== agent.id));
+        showToast(`${agent.name} approved successfully!`);
+      }
     } finally {
-      setPendingAgents((prev) => prev.filter((a) => a.id !== agent.id));
       setApprovingId(null);
-      setToast(`${agent.name} approved successfully!`);
     }
   };
 
@@ -436,10 +429,14 @@ export default function AgencyManagerApp() {
     );
 
     try {
-      await supabase
+      const { error } = await supabase
         .from("branches")
         .update({ momo_code: newMomoInput, phone: newPhoneInput })
         .eq("id", branchId);
+
+      if (error) {
+        console.warn("[manager] branch update error:", error.message);
+      }
     } catch (err) {
       console.warn("[manager] branch update sync skipped:", err);
     }
@@ -448,10 +445,9 @@ export default function AgencyManagerApp() {
     setNewMomoInput("");
     setNewPhoneInput("");
     setMomoError("");
-    setToast(`Branch details for ${targetBranch.name} updated successfully!`);
+    showToast(`Branch details for ${targetBranch.name} updated!`);
   };
 
-  // Handler for creating a new agency branch using branchService
   const handleCreateBranch = async (e: React.FormEvent) => {
     e.preventDefault();
     setNewBranchError("");
@@ -462,23 +458,23 @@ export default function AgencyManagerApp() {
       !newBranchMomoInput ||
       !newBranchPhoneInput
     ) {
-      setNewBranchError("Please fill in all required branch details.");
+      setNewBranchError("Please fill in all required fields.");
       return;
     }
 
     if (!/^\d{6,7}$/.test(newBranchMomoInput)) {
-      setNewBranchError("Momo code must be 6 or 7 digits.");
+      setNewBranchError("MoMo code must be 6 or 7 digits.");
       return;
     }
 
     const newBranchObj: BranchRecord = {
-      id: `br-${Date.now()}`,
+      id: crypto.randomUUID(),
       name: newBranchNameInput,
       location: newBranchLocationInput,
       momoCode: newBranchMomoInput,
       phone: newBranchPhoneInput,
-      agentName: newBranchAgentInput || "Assigned Agent",
-      agentEmail: `${newBranchNameInput.toLowerCase().replace(/\s+/g, "")}@virunga.rw`,
+      agentName: "Assigned Agent",
+      agentEmail: "agent@virunga.rw",
       stats: {
         today: { passengers: 0, revenue: 0 },
         monthly: { passengers: 0, revenue: 0 },
@@ -488,80 +484,56 @@ export default function AgencyManagerApp() {
 
     setBranches((prev) => [newBranchObj, ...prev]);
 
-    // Save using branchService
-    await createNewBranch(newBranchObj);
+    const ok = await createNewBranch(newBranchObj);
+    if (!ok) {
+      showToast("Branch saved locally — DB sync failed. Will retry.");
+    }
 
     setShowAddBranchModal(false);
     setNewBranchNameInput("");
     setNewBranchLocationInput("");
     setNewBranchMomoInput("");
     setNewBranchPhoneInput("");
-    setNewBranchAgentInput("");
-    setToast(`New branch ${newBranchObj.name} added successfully!`);
+    showToast(`Branch ${newBranchObj.name} added successfully!`);
   };
 
-  const handleChangePassword = (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordError("");
-
-    const storedMasterPass =
-      typeof window !== "undefined"
-        ? localStorage.getItem("urugendo_manager_password") || "54321"
-        : "54321";
-
-    if (currentPasswordInput !== storedMasterPass) {
-      setPasswordError("Incorrect current password.");
-      return;
-    }
-
-    if (!newPasswordInput || newPasswordInput.length < 4) {
-      setPasswordError("New password must be at least 4 characters.");
-      return;
-    }
-
-    if (typeof window !== "undefined") {
-      localStorage.setItem("urugendo_manager_password", newPasswordInput);
-    }
-
-    setShowPasswordDrawer(false);
-    setCurrentPasswordInput("");
-    setNewPasswordInput("");
-    setToast("Password changed successfully!");
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    clearManagerSession();
+    router.push("/agency/agency-login");
   };
 
   const handleGenerateReport = () => {
     const label = periodLabel(selectedPeriod, customDate);
-    const reportContent =
-      `URUGENDO AGENCY REPORT (${label})\n` +
-      `Agency: ${agencyName}\n` +
-      `Manager: ${managerName} (${managerEmail})\n` +
-      `Generated: ${new Date().toLocaleString()}\n` +
-      `Total Passengers: ${totalPassengers}\n` +
-      `Total Revenue: ${formatRwf(totalRevenue)}\n\n` +
-      `Branches Breakdown:\n` +
-      branchStats
-        .map(
-          ({ branch, stats }) =>
-            `- ${branch.name} (${branch.location}): ${formatRwf(
-              stats.revenue,
-            )} · ${stats.passengers} passengers · MoMo: *${branch.momoCode}#`,
-        )
-        .join("\n");
+    const lines = [
+      `URUGENDO AGENCY REPORT (${label})`,
+      `Agency: ${session?.agencyName}`,
+      `Manager: ${session?.name} (${session?.email})`,
+      `Generated: ${new Date().toLocaleString()}`,
+      `Total Passengers: ${totalPassengers}`,
+      `Total Revenue: ${formatRwf(totalRevenue)}`,
+      ``,
+      `Branches Breakdown:`,
+      ...branchStats.map(
+        ({ branch, stats }) =>
+          `- ${branch.name} (${branch.location}): ${formatRwf(stats.revenue)} · ${stats.passengers} passengers · MoMo: *${branch.momoCode}#`,
+      ),
+    ];
 
-    const blob = new Blob([reportContent], { type: "text/plain" });
+    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = `Urugendo_Report_${selectedPeriod}_${Date.now()}.txt`;
     a.click();
     URL.revokeObjectURL(url);
-    setToast("Report downloaded successfully");
+    showToast("Report downloaded successfully");
   };
 
   const openBranchEditor = (branch: BranchRecord) => {
     setEditingBranchId(branch.id);
     setNewMomoInput(branch.momoCode);
-    setNewPhoneInput(branch.phone || SUPPORT_PHONE);
+    setNewPhoneInput(branch.phone || "");
     setMomoError("");
   };
 
@@ -570,11 +542,23 @@ export default function AgencyManagerApp() {
     setShowPendingAgentsView(false);
   };
 
-  const languageLabels = {
-    rw: "Kinyarwanda",
-    en: "English",
-    fr: "Français",
-  };
+  const languageLabels = { rw: "Kinyarwanda", en: "English", fr: "Français" };
+
+  /* ---------------------------------------------------------------- */
+  /*  Loading / unauthed state                                         */
+  /* ---------------------------------------------------------------- */
+
+  if (checkingSession) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#F5F7FA]">
+        <div className="text-text-muted text-sm font-semibold animate-pulse">
+          Loading manager portal...
+        </div>
+      </div>
+    );
+  }
+
+  if (!session) return null;
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                           */
@@ -582,9 +566,8 @@ export default function AgencyManagerApp() {
 
   return (
     <div className="relative h-full w-full bg-[#F5F7FA] text-text-primary font-sans flex flex-col overflow-hidden">
-      {/* Scrollable Container */}
       <div className="flex-1 overflow-y-auto pb-20">
-        {/* PAGE 1: HOME */}
+        {/* ── HOME ──────────────────────────────────────────────── */}
         {activeTab === "home" && (
           <>
             <div className="bg-primary text-white pt-12 pb-5 px-6 rounded-b-[32px] shadow-lg relative overflow-hidden">
@@ -602,19 +585,21 @@ export default function AgencyManagerApp() {
                       Agency Dashboard
                     </h1>
                     <p className="text-[11px] text-white/75 font-medium truncate max-w-[180px]">
-                      {agencyName} · {branches.length} branches
+                      {session.agencyName} · {branches.length} branch{branches.length !== 1 ? "es" : ""}
                     </p>
                   </div>
                 </div>
+
                 <button
                   type="button"
                   onClick={() => setShowPendingAgentsView(true)}
                   className="relative p-2.5 bg-white/15 backdrop-blur-md rounded-2xl border border-white/20 active:scale-95 transition-transform cursor-pointer"
+                  aria-label="View pending agents"
                 >
                   <Bell size={20} className="text-white" />
                   {pendingAgents.length > 0 && (
                     <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-primary">
-                      {pendingAgents.length}
+                      {pendingAgents.length > 9 ? "9+" : pendingAgents.length}
                     </span>
                   )}
                 </button>
@@ -622,17 +607,17 @@ export default function AgencyManagerApp() {
 
               <div className="grid grid-cols-4 gap-2 relative z-10">
                 {[
-                  { label: "Branches", value: `${branches.length}` },
+                  { label: "Branches", value: branches.length },
                   { label: "Revenue", value: formatCompact(totalRevenue) },
                   { label: "Riders", value: formatCompact(totalPassengers) },
-                  { label: "Pending", value: `${pendingAgents.length}` },
+                  { label: "Pending", value: pendingAgents.length },
                 ].map((pill) => (
                   <div
                     key={pill.label}
                     className="bg-white/15 backdrop-blur-md rounded-2xl py-2 px-1 text-center border border-white/10"
                   >
                     <div className="text-sm font-black leading-none">
-                      {pill.value}
+                      {statsLoading && pill.label === "Revenue" ? "…" : pill.value}
                     </div>
                     <div className="text-[9px] font-bold uppercase tracking-wide text-white/75 mt-1">
                       {pill.label}
@@ -643,6 +628,7 @@ export default function AgencyManagerApp() {
             </div>
 
             <div className="p-5 space-y-5">
+              {/* Pending agents alert banner */}
               {pendingAgents.length > 0 && (
                 <div
                   onClick={() => setShowPendingAgentsView(true)}
@@ -676,18 +662,20 @@ export default function AgencyManagerApp() {
                 <div className="absolute -bottom-6 -right-6 w-28 h-28 bg-white/10 rounded-full blur-xl pointer-events-none" />
                 <div className="flex items-center justify-between relative z-10">
                   <span className="text-[11px] font-bold uppercase tracking-wide text-white/80">
-                    {periodLabel(selectedPeriod, customDate)}'s Dynamic Revenue
+                    {periodLabel(selectedPeriod, customDate)}&apos;s Revenue
                   </span>
                   <div className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center">
                     <DollarSign size={16} />
                   </div>
                 </div>
                 <h2 className="text-3xl font-black mt-2 relative z-10">
-                  {formatRwf(totalRevenue)}
+                  {statsLoading ? "—" : formatRwf(totalRevenue)}
                 </h2>
                 <p className="text-[11px] text-white/80 mt-1 flex items-center gap-1 relative z-10">
                   <TrendingUp size={13} />
-                  {totalPassengers.toLocaleString()} verified station bookings
+                  {statsLoading
+                    ? "Loading..."
+                    : `${totalPassengers.toLocaleString()} verified bookings`}
                 </p>
               </div>
 
@@ -700,11 +688,10 @@ export default function AgencyManagerApp() {
                     Top Branch
                   </p>
                   <p className="text-sm font-black text-text-primary mt-0.5 leading-tight">
-                    {topBranch?.branch.name.split(" ")[0] ?? "—"}
+                    {topBranch ? topBranch.branch.name.split(" ")[0] : "—"}
                   </p>
                   <p className="text-[10px] text-primary font-bold">
-                    {topBranch ? formatCompact(topBranch.stats.revenue) : "0"}{" "}
-                    RWF
+                    {topBranch ? formatCompact(topBranch.stats.revenue) : "0"} RWF
                   </p>
                 </div>
                 <div className="bg-white rounded-2xl p-4 border border-border shadow-sm">
@@ -717,9 +704,7 @@ export default function AgencyManagerApp() {
                   <p className="text-sm font-black text-text-primary mt-0.5">
                     {pendingAgents.length}
                   </p>
-                  <p className="text-[10px] text-text-muted">
-                    Awaiting approval
-                  </p>
+                  <p className="text-[10px] text-text-muted">Awaiting approval</p>
                 </div>
               </div>
 
@@ -745,12 +730,12 @@ export default function AgencyManagerApp() {
           </>
         )}
 
-        {/* PAGE 2: BRANCHES */}
+        {/* ── BRANCHES ──────────────────────────────────────────── */}
         {activeTab === "branches" && (
           <div className="p-5 space-y-5 pt-10">
             <SectionHeader
               title="Agency Branches"
-              subtitle={`${agencyName} · ${branches.length} active stations`}
+              subtitle={`${session.agencyName} · ${branches.length} active stations`}
               action={
                 <button
                   type="button"
@@ -770,98 +755,116 @@ export default function AgencyManagerApp() {
               onCustomDateChange={setCustomDate}
             />
 
-            <div className="space-y-4">
-              {branchStats.map(({ branch: b, stats }) => (
-                <div
-                  key={b.id}
-                  className="bg-white rounded-3xl p-5 border border-border shadow-sm relative space-y-3"
-                >
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h3 className="font-bold text-text-primary text-base">
-                        {b.name}
-                      </h3>
-                      <p className="text-xs text-text-muted flex items-center gap-1 mt-0.5">
-                        <MapPin size={12} />
-                        {b.location} · Agent: {b.agentName}
-                      </p>
-                      <p className="text-xs font-mono text-primary font-semibold mt-1">
-                        Phone: {b.phone || SUPPORT_PHONE}
-                      </p>
+            {branches.length === 0 ? (
+              <div className="bg-white rounded-3xl p-8 text-center border border-border shadow-sm">
+                <Building2 size={48} className="mx-auto text-slate-300 mb-3" />
+                <h3 className="font-bold text-text-primary text-base">
+                  No branches yet
+                </h3>
+                <p className="text-xs text-text-muted mt-1">
+                  Add your first branch to get started.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {branchStats.map(({ branch: b, stats }) => (
+                  <div
+                    key={b.id}
+                    className="bg-white rounded-3xl p-5 border border-border shadow-sm relative space-y-3"
+                  >
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h3 className="font-bold text-text-primary text-base">
+                          {b.name}
+                        </h3>
+                        <p className="text-xs text-text-muted flex items-center gap-1 mt-0.5">
+                          <MapPin size={12} />
+                          {b.location}
+                          {b.agentName && b.agentName !== "Assigned Agent"
+                            ? ` · ${b.agentName}`
+                            : ""}
+                        </p>
+                        <p className="text-xs font-mono text-primary font-semibold mt-1">
+                          {b.phone || "—"}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openBranchEditor(b)}
+                        className="px-3 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-bold text-xs rounded-xl hover:bg-amber-100 transition-colors cursor-pointer"
+                      >
+                        Edit Info
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => openBranchEditor(b)}
-                      className="px-3 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-bold text-xs rounded-xl hover:bg-amber-100 transition-colors cursor-pointer"
-                    >
-                      Edit Info
-                    </button>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-2xl text-xs">
-                    <div>
-                      <span className="text-[10px] text-text-muted block font-bold uppercase">
-                        Branch Revenue
-                      </span>
-                      <span className="font-black text-primary text-sm">
-                        {formatRwf(stats.revenue)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-text-muted block font-bold uppercase">
-                        Passengers
-                      </span>
-                      <span className="font-bold text-text-primary text-sm">
-                        {stats.passengers}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="bg-amber-50/60 border border-amber-200/80 rounded-2xl p-3 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-amber-400 text-slate-900 flex items-center justify-center font-black">
-                        <QrCode size={18} />
+                    <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-2xl text-xs">
+                      <div>
+                        <span className="text-[10px] text-text-muted block font-bold uppercase">
+                          Branch Revenue
+                        </span>
+                        <span className="font-black text-primary text-sm">
+                          {statsLoading ? "—" : formatRwf(stats.revenue)}
+                        </span>
                       </div>
                       <div>
-                        <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider block">
-                          Merchant MoMo Code
+                        <span className="text-[10px] text-text-muted block font-bold uppercase">
+                          Passengers
                         </span>
-                        <span className="text-base font-extrabold text-slate-900 font-mono tracking-wider">
-                          *{b.momoCode}#
+                        <span className="font-bold text-text-primary text-sm">
+                          {statsLoading ? "—" : stats.passengers}
                         </span>
                       </div>
                     </div>
-                    <span className="text-[9px] font-extrabold bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded-md uppercase">
-                      MTN MoMo
-                    </span>
+
+                    <div className="bg-amber-50/60 border border-amber-200/80 rounded-2xl p-3 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-amber-400 text-slate-900 flex items-center justify-center font-black">
+                          <QrCode size={18} />
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider block">
+                            Merchant MoMo Code
+                          </span>
+                          <span className="text-base font-extrabold text-slate-900 font-mono tracking-wider">
+                            *{b.momoCode || "——"}#
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-[9px] font-extrabold bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded-md uppercase">
+                        MTN MoMo
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
-        {/* PAGE 3: PROFILE */}
+        {/* ── PROFILE ─────────────────────────────────────────── */}
         {activeTab === "profile" && (
           <div className="p-5 space-y-5 pt-10">
             <SectionHeader
               title="Profile"
-              subtitle="Manager account settings & secure persistence"
+              subtitle="Manager account settings"
             />
 
             <div className="bg-white rounded-3xl p-5 border border-border shadow-sm text-center relative">
               <div className="w-16 h-16 rounded-full bg-primary/10 text-primary flex items-center justify-center font-black text-2xl mx-auto mb-3 border border-primary/20">
-                {managerName.charAt(0)}
+                {session.name.charAt(0).toUpperCase()}
               </div>
               <h2 className="font-extrabold text-text-primary text-lg">
-                {managerName}
+                {session.name}
               </h2>
               <p className="text-xs text-text-muted font-medium">
-                {managerEmail}
+                {session.email}
               </p>
               <span className="inline-block mt-2 text-[10px] bg-primary/10 text-primary px-3 py-1 rounded-full font-bold">
-                {agencyName} Manager
+                {session.agencyName} Manager
               </span>
+              <p className="text-[10px] text-text-muted mt-1 font-mono">
+                Code: {session.managerCode}
+              </p>
             </div>
 
             <div className="bg-white rounded-3xl p-4 border border-border shadow-sm space-y-1 text-xs font-bold text-text-primary">
@@ -892,27 +895,9 @@ export default function AgencyManagerApp() {
                 <ChevronRight size={16} className="text-text-muted" />
               </button>
 
-              <a
-                href={`tel:${SUPPORT_PHONE}`}
-                className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-2xl transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <Phone size={18} className="text-primary" />
-                  <span>Contact Urugendo Support</span>
-                </div>
-                <span className="text-xs font-mono text-primary font-bold">
-                  {SUPPORT_PHONE}
-                </span>
-              </a>
-
               <button
                 type="button"
-                onClick={() => {
-                  if (typeof window !== "undefined") {
-                    localStorage.removeItem("urugendo_role");
-                  }
-                  router.push("/agency/agency-login");
-                }}
+                onClick={handleLogout}
                 className="w-full flex items-center gap-3 p-3 text-red-600 hover:bg-red-50 rounded-2xl pt-3 border-t border-slate-100 mt-1 cursor-pointer"
               >
                 <LogOut size={18} />
@@ -923,7 +908,7 @@ export default function AgencyManagerApp() {
         )}
       </div>
 
-      {/* Notifications / Pending Agents Modal */}
+      {/* ── PENDING AGENTS MODAL ──────────────────────────────────── */}
       <AnimatePresence>
         {showPendingAgentsView && (
           <motion.div
@@ -942,7 +927,7 @@ export default function AgencyManagerApp() {
                     Pending Agents
                   </h2>
                   <p className="text-xs text-text-muted">
-                    Instant manager authorization notifications
+                    Approve or reject agent registrations
                   </p>
                 </div>
               </div>
@@ -962,7 +947,7 @@ export default function AgencyManagerApp() {
                   All Agents Approved
                 </h3>
                 <p className="text-xs text-text-muted mt-1">
-                  There are no pending agent registrations right now.
+                  No pending agent registrations right now.
                 </p>
               </div>
             ) : (
@@ -977,9 +962,7 @@ export default function AgencyManagerApp() {
                         <h3 className="font-bold text-text-primary text-sm">
                           {ag.name}
                         </h3>
-                        <p className="text-[11px] text-text-muted">
-                          {ag.email}
-                        </p>
+                        <p className="text-[11px] text-text-muted">{ag.email}</p>
                       </div>
                       <span className="text-[9px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-bold border border-amber-200">
                         Pending
@@ -1021,7 +1004,7 @@ export default function AgencyManagerApp() {
         )}
       </AnimatePresence>
 
-      {/* Add New Branch Modal Form */}
+      {/* ── ADD BRANCH MODAL ────────────────────────────────────── */}
       {showAddBranchModal && (
         <div className="absolute inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-5">
           <div className="bg-white rounded-3xl p-5 w-full max-w-md space-y-4 shadow-2xl border border-border max-h-[90vh] overflow-y-auto">
@@ -1039,73 +1022,49 @@ export default function AgencyManagerApp() {
             </div>
 
             <form onSubmit={handleCreateBranch} className="space-y-3">
-              <div>
-                <label className="text-[11px] font-bold text-text-primary block mb-1">
-                  Branch Name
-                </label>
-                <input
-                  type="text"
-                  value={newBranchNameInput}
-                  onChange={(e) => setNewBranchNameInput(e.target.value)}
-                  placeholder="e.g. Muhanga Terminal"
-                  className="w-full h-10 px-3 rounded-xl border border-border text-xs font-semibold focus:outline-none focus:border-primary"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-text-primary block mb-1">
-                  Branch Location (City)
-                </label>
-                <input
-                  type="text"
-                  value={newBranchLocationInput}
-                  onChange={(e) => setNewBranchLocationInput(e.target.value)}
-                  placeholder="e.g. Muhanga"
-                  className="w-full h-10 px-3 rounded-xl border border-border text-xs font-semibold focus:outline-none focus:border-primary"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-text-primary block mb-1">
-                  Branch MoMo Code (6-7 digits)
-                </label>
-                <input
-                  type="text"
-                  maxLength={7}
-                  value={newBranchMomoInput}
-                  onChange={(e) =>
-                    setNewBranchMomoInput(e.target.value.replace(/\D/g, ""))
-                  }
-                  placeholder="e.g. 5129401"
-                  className="w-full h-10 px-3 rounded-xl border border-border font-mono text-xs font-black tracking-widest focus:outline-none focus:border-primary"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-text-primary block mb-1">
-                  Branch Phone / Helpline Number
-                </label>
-                <input
-                  type="text"
-                  value={newBranchPhoneInput}
-                  onChange={(e) => setNewBranchPhoneInput(e.target.value)}
-                  placeholder="e.g. +250788112233"
-                  className="w-full h-10 px-3 rounded-xl border border-border font-mono text-xs font-semibold focus:outline-none focus:border-primary"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-text-primary block mb-1">
-                  Assigned Station Agent Name
-                </label>
-                <input
-                  type="text"
-                  value={newBranchAgentInput}
-                  onChange={(e) => setNewBranchAgentInput(e.target.value)}
-                  placeholder="e.g. Jean Pierre"
-                  className="w-full h-10 px-3 rounded-xl border border-border text-xs font-semibold focus:outline-none focus:border-primary"
-                />
-              </div>
+              {[
+                {
+                  label: "Branch Name",
+                  value: newBranchNameInput,
+                  setter: setNewBranchNameInput,
+                  placeholder: "e.g. Muhanga Terminal",
+                },
+                {
+                  label: "Branch Location (City)",
+                  value: newBranchLocationInput,
+                  setter: setNewBranchLocationInput,
+                  placeholder: "e.g. Muhanga",
+                },
+                {
+                  label: "Branch MoMo Code (6-7 digits)",
+                  value: newBranchMomoInput,
+                  setter: (v: string) => setNewBranchMomoInput(v.replace(/\D/g, "")),
+                  placeholder: "e.g. 5129401",
+                  mono: true,
+                },
+                {
+                  label: "Branch Phone / Helpline",
+                  value: newBranchPhoneInput,
+                  setter: setNewBranchPhoneInput,
+                  placeholder: "e.g. +250788112233",
+                  mono: true,
+                },
+              ].map(({ label, value, setter, placeholder, mono }) => (
+                <div key={label}>
+                  <label className="text-[11px] font-bold text-text-primary block mb-1">
+                    {label}
+                  </label>
+                  <input
+                    type="text"
+                    value={value}
+                    onChange={(e) => setter(e.target.value)}
+                    placeholder={placeholder}
+                    className={`w-full h-10 px-3 rounded-xl border border-border text-xs font-semibold focus:outline-none focus:border-primary ${
+                      mono ? "font-mono" : ""
+                    }`}
+                  />
+                </div>
+              ))}
 
               {newBranchError && (
                 <p className="text-[11px] font-bold text-red-600 text-center bg-red-50 p-2 rounded-lg">
@@ -1125,7 +1084,7 @@ export default function AgencyManagerApp() {
                   type="submit"
                   className="flex-1 py-2.5 rounded-xl bg-primary text-white font-bold text-xs shadow-md cursor-pointer"
                 >
-                  Save Branch to DB
+                  Save Branch
                 </button>
               </div>
             </form>
@@ -1133,7 +1092,7 @@ export default function AgencyManagerApp() {
         </div>
       )}
 
-      {/* Language Selector Sheet */}
+      {/* ── LANGUAGE SHEET ─────────────────────────────────────── */}
       <AnimatePresence>
         {showLanguageSheet && (
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-end justify-center">
@@ -1160,10 +1119,10 @@ export default function AgencyManagerApp() {
               <div className="space-y-1">
                 {(
                   [
-                    { id: "rw", name: "Kinyarwanda" },
-                    { id: "en", name: "English" },
-                    { id: "fr", name: "Français" },
-                  ] as const
+                    { id: "rw" as const, name: "Kinyarwanda" },
+                    { id: "en" as const, name: "English" },
+                    { id: "fr" as const, name: "Français" },
+                  ]
                 ).map((lang) => (
                   <button
                     key={lang.id}
@@ -1171,7 +1130,7 @@ export default function AgencyManagerApp() {
                     onClick={() => {
                       setLanguage(lang.id);
                       setShowLanguageSheet(false);
-                      setToast(`Language changed to ${lang.name}`);
+                      showToast(`Language changed to ${lang.name}`);
                     }}
                     className={`w-full p-3 rounded-2xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer ${
                       language === lang.id
@@ -1189,7 +1148,7 @@ export default function AgencyManagerApp() {
         )}
       </AnimatePresence>
 
-      {/* Change Password Drawer */}
+      {/* ── CHANGE PASSWORD ────────────────────────────────────── */}
       <AnimatePresence>
         {showPasswordDrawer && (
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-end justify-center">
@@ -1204,7 +1163,7 @@ export default function AgencyManagerApp() {
                 <div className="flex items-center gap-2">
                   <KeyRound size={18} className="text-primary" />
                   <h3 className="font-extrabold text-text-primary text-base">
-                    Change Account Password
+                    Change Password
                   </h3>
                 </div>
                 <button
@@ -1219,32 +1178,17 @@ export default function AgencyManagerApp() {
                 </button>
               </div>
 
-              <form onSubmit={handleChangePassword} className="space-y-3">
-                <div>
-                  <label className="text-[11px] font-bold text-text-primary block mb-1">
-                    Current Master Password
-                  </label>
-                  <input
-                    type="password"
-                    value={currentPasswordInput}
-                    onChange={(e) => setCurrentPasswordInput(e.target.value)}
-                    placeholder="Enter current password (e.g. 54321)"
-                    className="w-full h-10 px-3 rounded-xl border border-border text-xs font-semibold focus:outline-none focus:border-primary"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-text-primary block mb-1">
-                    New Master Password
-                  </label>
-                  <input
-                    type="password"
-                    value={newPasswordInput}
-                    onChange={(e) => setNewPasswordInput(e.target.value)}
-                    placeholder="Enter new password"
-                    className="w-full h-10 px-3 rounded-xl border border-border text-xs font-semibold focus:outline-none focus:border-primary"
-                  />
-                </div>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setPasswordError("Password change requires a database migration. Contact the Urugendo team.");
+                }}
+                className="space-y-3"
+              >
+                <p className="text-xs text-text-muted text-center py-2">
+                  Password changes require a manual update via the Urugendo team.
+                  Contact support to update your credentials.
+                </p>
 
                 {passwordError && (
                   <p className="text-[11px] font-bold text-red-600 text-center bg-red-50 p-2 rounded-lg">
@@ -1256,7 +1200,7 @@ export default function AgencyManagerApp() {
                   type="submit"
                   className="w-full h-11 bg-primary text-white font-bold text-xs rounded-xl shadow-md cursor-pointer mt-2"
                 >
-                  Update Master Password
+                  Close
                 </button>
               </form>
             </motion.div>
@@ -1264,7 +1208,7 @@ export default function AgencyManagerApp() {
         )}
       </AnimatePresence>
 
-      {/* Edit Branch MoMo & Phone Modal */}
+      {/* ── EDIT BRANCH MODAL ─────────────────────────────────── */}
       {editingBranchId && (
         <div className="absolute inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-5">
           <div className="bg-white rounded-3xl p-5 w-full space-y-4 shadow-2xl border border-border">
@@ -1272,38 +1216,39 @@ export default function AgencyManagerApp() {
               Update Branch Details
             </h3>
             <p className="text-xs text-text-muted">
-              Update merchant payment code and branch contact phone number.
+              Update merchant payment code and branch contact phone.
             </p>
 
             <div className="space-y-3">
-              <div>
-                <label className="text-[11px] font-bold text-text-primary block mb-1">
-                  MoMo Pay Code (6-7 digits)
-                </label>
-                <input
-                  type="text"
-                  maxLength={7}
-                  value={newMomoInput}
-                  onChange={(e) =>
-                    setNewMomoInput(e.target.value.replace(/\D/g, ""))
-                  }
-                  placeholder="e.g. 8291034"
-                  className="w-full p-3 bg-slate-50 border border-border rounded-xl font-mono text-center font-black text-lg tracking-widest outline-none focus:border-primary"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-text-primary block mb-1">
-                  Branch Phone / WhatsApp Number
-                </label>
-                <input
-                  type="text"
-                  value={newPhoneInput}
-                  onChange={(e) => setNewPhoneInput(e.target.value)}
-                  placeholder="e.g. +250782490611"
-                  className="w-full p-3 bg-slate-50 border border-border rounded-xl font-mono text-center font-bold text-sm outline-none focus:border-primary"
-                />
-              </div>
+              {[
+                {
+                  label: "MoMo Pay Code (6-7 digits)",
+                  value: newMomoInput,
+                  setter: (v: string) => setNewMomoInput(v.replace(/\D/g, "")),
+                  mono: true,
+                },
+                {
+                  label: "Branch Phone / WhatsApp",
+                  value: newPhoneInput,
+                  setter: setNewPhoneInput,
+                },
+              ].map(({ label, value, setter, mono }) => (
+                <div key={label}>
+                  <label className="text-[11px] font-bold text-text-primary block mb-1">
+                    {label}
+                  </label>
+                  <input
+                    type="text"
+                    value={value}
+                    onChange={(e) => setter(e.target.value)}
+                    className={`w-full p-3 bg-slate-50 border border-border rounded-xl ${
+                      mono
+                        ? "font-mono text-center font-black text-lg tracking-widest outline-none focus:border-primary"
+                        : "font-mono text-center font-bold text-sm outline-none focus:border-primary"
+                    }`}
+                  />
+                </div>
+              ))}
             </div>
 
             {momoError && (
@@ -1334,9 +1279,9 @@ export default function AgencyManagerApp() {
         </div>
       )}
 
-      {/* Toast Notification */}
+      {/* ── TOAST ──────────────────────────────────────────────── */}
       <AnimatePresence>
-        {toast && (
+        {toastVisible && toast && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1350,14 +1295,14 @@ export default function AgencyManagerApp() {
         )}
       </AnimatePresence>
 
-      {/* Manager Navigation Bar */}
+      {/* ── NAV BAR ────────────────────────────────────────────── */}
       <div className="absolute bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-border px-6 py-2 flex justify-around items-center z-40">
         {(
           [
-            { key: "home", label: "Dashboard", icon: LayoutDashboard },
-            { key: "branches", label: "Branches", icon: Building2 },
-            { key: "profile", label: "Profile", icon: User },
-          ] as { key: Tab; label: string; icon: typeof User }[]
+            { key: "home" as Tab, label: "Dashboard", icon: LayoutDashboard },
+            { key: "branches" as Tab, label: "Branches", icon: Building2 },
+            { key: "profile" as Tab, label: "Profile", icon: User },
+          ]
         ).map(({ key, label, icon: Icon }) => {
           const isActive = activeTab === key && !showPendingAgentsView;
           return (

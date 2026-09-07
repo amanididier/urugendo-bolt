@@ -93,20 +93,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (savedLang === "EN" || savedLang === "FR" || savedLang === "KIN") {
       setLanguageState(savedLang as Language);
     }
-    const savedRole = localStorage.getItem("urugendo_role");
-    if (
-      savedRole === "agent" ||
-      savedRole === "passenger" ||
-      savedRole === "manager"
-    ) {
-      setUserRoleState(savedRole as UserRole);
-    }
+    // Batch 1: role is derived from the auth session, NOT from localStorage.
+    // Reading "urugendo_role" here is intentionally removed so that a stale
+    // role from a previous logout cannot grant the wrong permissions to the
+    // next signed-in user. The session-driven effect below sets userRole
+    // after we identify the user against profiles/agency_agents.
     const savedStatus = localStorage.getItem("urugendo_agent_status");
     if (savedStatus === "approved" || savedStatus === "pending") {
       setAgentStatusState(savedStatus as AgentStatus);
     }
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
         const meta = session.user.user_metadata;
         const resolvedName =
@@ -127,7 +124,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
         localStorage.setItem("urugendo_user_email", resolvedEmail);
         if (resolvedPhone)
           localStorage.setItem("urugendo_user_phone", resolvedPhone);
+
+        // Derive role from the authenticated user: which Supabase table
+        // identifies them? manager is a hard-coded email until Batch 5.
+        const userEmail = session.user.email || "";
+        if (userEmail === "ishimweamanid@gmail.com") {
+          setUserRoleState("manager");
+        } else {
+          const { data: agentRow } = await supabase
+            .from("agency_agents")
+            .select("id")
+            .eq("user_id", session.user.id)
+            .maybeSingle();
+          if (agentRow) {
+            setUserRoleState("agent");
+          } else {
+            setUserRoleState("passenger");
+          }
+        }
       } else {
+        // No session — clear cached identity, do NOT keep stale role.
         const savedLogin = localStorage.getItem("urugendo_is_logged_in");
         if (savedLogin !== null) {
           setIsLoggedInState(savedLogin === "true");
@@ -138,11 +154,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (savedEmail) setUserEmailState(savedEmail);
         const savedPhone = localStorage.getItem("urugendo_user_phone");
         if (savedPhone) setUserPhoneState(savedPhone);
+        setUserRoleState("passenger");
       }
     });
 
     const { data: authListener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
+      async (_event, session) => {
         if (session?.user) {
           const meta = session.user.user_metadata;
           const resolvedName =
@@ -222,8 +239,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setUserRole = useCallback((role: UserRole) => {
+    // Batch 1: role is now derived from the auth session. The setter is kept
+    // (callers still call it) but it no longer persists to localStorage —
+    // a stale role from a previous user must not survive a logout.
     setUserRoleState(role);
-    localStorage.setItem("urugendo_role", role);
   }, []);
 
   const setAgentStatus = useCallback((status: AgentStatus) => {
