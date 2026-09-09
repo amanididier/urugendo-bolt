@@ -134,3 +134,21 @@ export async function createNewBranch(branch: BranchRecord): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Delete a branch dynamically from Supabase database
+ */
+export async function deleteBranch(branchId: string): Promise<boolean> {
+  try {
+    const { error } = await supabase.from("branches").delete().eq("id", branchId);
+    if (error) {
+      console.warn("[branchService] error deleting branch:", error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("[branchService] exception deleting branch:", err);
+    return false;
+  }
+}
+

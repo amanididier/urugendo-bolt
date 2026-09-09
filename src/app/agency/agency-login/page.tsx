@@ -96,6 +96,7 @@ function LoginContent() {
   const [managerEmail, setManagerEmail] = useState("");
   const [managerCode, setManagerCode] = useState("");
   const [managerPassword, setManagerPassword] = useState("");
+  const [managerAgency, setManagerAgency] = useState("Virunga Express");
   const [managerError, setManagerError] = useState("");
 
   // Local storage auto-persistence check on mount
@@ -473,6 +474,7 @@ function LoginContent() {
       email: managerEmail,
       managerCode: managerCode,
       password: managerPassword,
+      agencyName: managerAgency,
     });
 
     if (!result.ok) {
@@ -483,6 +485,9 @@ function LoginContent() {
         case "not_found":
         case "code_mismatch":
           setManagerError("Invalid email or manager code.");
+          break;
+        case "agency_mismatch":
+          setManagerError("This manager account is not assigned to the selected agency.");
           break;
         case "inactive":
           setManagerError("This manager account has been deactivated.");
@@ -959,6 +964,31 @@ function LoginContent() {
               </div>
 
               <form onSubmit={handleManagerLogin} className="mt-4 space-y-3">
+                <div>
+                  <label className="text-[11.5px] font-bold text-text-primary block mb-1">
+                    Agency Company
+                  </label>
+                  <select
+                    value={managerAgency}
+                    onChange={(e) => setManagerAgency(e.target.value)}
+                    className="w-full h-10 px-3 rounded-xl border border-border text-[13px] font-bold bg-white text-text-primary focus:outline-none focus:border-primary"
+                  >
+                    {operators.length > 0 ? (
+                      operators.map((op) => (
+                        <option key={op.id} value={op.name}>
+                          {op.name}
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="Virunga Express">Virunga Express</option>
+                        <option value="Volcano Express">Volcano Express</option>
+                        <option value="RITCO">RITCO</option>
+                        <option value="Trinity Express">Trinity Express</option>
+                      </>
+                    )}
+                  </select>
+                </div>
                 <div>
                   <label className="text-[11.5px] font-bold text-text-primary block mb-1">
                     Manager Email

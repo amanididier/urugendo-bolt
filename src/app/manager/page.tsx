@@ -26,11 +26,13 @@ import {
   KeyRound,
   QrCode,
   PlusCircle,
+  Trash2,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import {
   fetchAgencyBranches,
   createNewBranch,
+  deleteBranch,
   fetchBranchRevenue,
   BranchRecord,
   PeriodStats,
@@ -39,6 +41,7 @@ import {
   getStoredManager,
   clearManagerSession,
   getStoredManagerId,
+  updateManagerPassword,
 } from "@/lib/managerAuth";
 
 /* ------------------------------------------------------------------ */
@@ -235,11 +238,17 @@ export default function AgencyManagerApp() {
 
   // ── UI state ────────────────────────────────────────────────────────
   const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [deletingBranchId, setDeletingBranchId] = useState<string | null>(null);
+  const [deletingBranchName, setDeletingBranchName] = useState<string>("");
+  const [isDeleting, setIsDeleting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [showPasswordDrawer, setShowPasswordDrawer] = useState(false);
   const [currentPasswordInput, setCurrentPasswordInput] = useState("");
   const [newPasswordInput, setNewPasswordInput] = useState("");
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState("");
+  const [passwordSuccess, setPasswordSuccess] = useState("");
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [showLanguageSheet, setShowLanguageSheet] = useState(false);
   const [language, setLanguage] = useState<"rw" | "en" | "fr">("rw");
   const [toastVisible, setToastVisible] = useState(false);
@@ -495,6 +504,69 @@ export default function AgencyManagerApp() {
     setNewBranchMomoInput("");
     setNewBranchPhoneInput("");
     showToast(`Branch ${newBranchObj.name} added successfully!`);
+  };
+
+  const handleDeleteBranchConfirm = async () => {
+    if (!deletingBranchId) return;
+    setIsDeleting(true);
+    const targetName = deletingBranchName;
+
+    const ok = await deleteBranch(deletingBranchId);
+    setIsDeleting(false);
+    setDeletingBranchId(null);
+    setDeletingBranchName("");
+
+    if (ok) {
+      setBranches((prev) => prev.filter((b) => b.id !== deletingBranchId));
+      showToast(`Branch ${targetName} deleted successfully.`);
+    } else {
+      showToast(`Failed to delete branch ${targetName}. Try again.`);
+    }
+  };
+
+  const handlePasswordChangeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError("");
+    setPasswordSuccess("");
+
+    if (!session?.id) {
+      setPasswordError("Session error. Please sign in again.");
+      return;
+    }
+    if (!currentPasswordInput || !newPasswordInput || !confirmPasswordInput) {
+      setPasswordError("Please fill in all password fields.");
+      return;
+    }
+    if (newPasswordInput !== confirmPasswordInput) {
+      setPasswordError("New passwords do not match.");
+      return;
+    }
+    if (newPasswordInput.length < 6) {
+      setPasswordError("New password must be at least 6 characters.");
+      return;
+    }
+
+    setIsChangingPassword(true);
+    const res = await updateManagerPassword(
+      session.id,
+      currentPasswordInput,
+      newPasswordInput,
+    );
+    setIsChangingPassword(false);
+
+    if (!res.ok) {
+      setPasswordError(res.message);
+    } else {
+      setPasswordSuccess("Password changed successfully!");
+      setCurrentPasswordInput("");
+      setNewPasswordInput("");
+      setConfirmPasswordInput("");
+      showToast("Master password updated successfully!");
+      setTimeout(() => {
+        setShowPasswordDrawer(false);
+        setPasswordSuccess("");
+      }, 1500);
+    }
   };
 
   const handleLogout = async () => {
@@ -788,13 +860,26 @@ export default function AgencyManagerApp() {
                           {b.phone || "—"}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => openBranchEditor(b)}
-                        className="px-3 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-bold text-xs rounded-xl hover:bg-amber-100 transition-colors cursor-pointer"
-                      >
-                        Edit Info
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openBranchEditor(b)}
+                          className="px-3 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-bold text-xs rounded-xl hover:bg-amber-100 transition-colors cursor-pointer"
+                        >
+                          Edit Info
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDeletingBranchId(b.id);
+                            setDeletingBranchName(b.name);
+                          }}
+                          className="p-1.5 bg-red-50 border border-red-200 text-red-600 font-bold text-xs rounded-xl hover:bg-red-100 transition-colors cursor-pointer"
+                          title="Delete Branch"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-2xl text-xs">
@@ -1178,17 +1263,45 @@ export default function AgencyManagerApp() {
                 </button>
               </div>
 
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  setPasswordError("Password change requires a database migration. Contact the Urugendo team.");
-                }}
-                className="space-y-3"
-              >
-                <p className="text-xs text-text-muted text-center py-2">
-                  Password changes require a manual update via the Urugendo team.
-                  Contact support to update your credentials.
-                </p>
+              <form onSubmit={handlePasswordChangeSubmit} className="space-y-3">
+                <div>
+                  <label className="text-[11.5px] font-bold text-text-primary block mb-1">
+                    Current Master Password
+                  </label>
+                  <input
+                    type="password"
+                    value={currentPasswordInput}
+                    onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full h-10 px-3 rounded-xl border border-border text-[13px] font-medium focus:outline-none focus:border-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11.5px] font-bold text-text-primary block mb-1">
+                    New Master Password
+                  </label>
+                  <input
+                    type="password"
+                    value={newPasswordInput}
+                    onChange={(e) => setNewPasswordInput(e.target.value)}
+                    placeholder="Min 6 characters"
+                    className="w-full h-10 px-3 rounded-xl border border-border text-[13px] font-medium focus:outline-none focus:border-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11.5px] font-bold text-text-primary block mb-1">
+                    Confirm New Password
+                  </label>
+                  <input
+                    type="password"
+                    value={confirmPasswordInput}
+                    onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                    placeholder="Repeat new password"
+                    className="w-full h-10 px-3 rounded-xl border border-border text-[13px] font-medium focus:outline-none focus:border-primary"
+                  />
+                </div>
 
                 {passwordError && (
                   <p className="text-[11px] font-bold text-red-600 text-center bg-red-50 p-2 rounded-lg">
@@ -1196,17 +1309,63 @@ export default function AgencyManagerApp() {
                   </p>
                 )}
 
+                {passwordSuccess && (
+                  <p className="text-[11px] font-bold text-emerald-700 text-center bg-emerald-50 p-2 rounded-lg">
+                    {passwordSuccess}
+                  </p>
+                )}
+
                 <button
                   type="submit"
-                  className="w-full h-11 bg-primary text-white font-bold text-xs rounded-xl shadow-md cursor-pointer mt-2"
+                  disabled={isChangingPassword}
+                  className="w-full h-11 bg-primary text-white font-bold text-xs rounded-xl shadow-md cursor-pointer mt-2 disabled:opacity-50"
                 >
-                  Close
+                  {isChangingPassword ? "Updating Password..." : "Update Master Password"}
                 </button>
               </form>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
+
+      {/* ── DELETE BRANCH CONFIRMATION MODAL ────────────────── */}
+      {deletingBranchId && (
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-5">
+          <div className="bg-white rounded-3xl p-5 w-full max-w-xs space-y-4 shadow-2xl border border-border text-center">
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto">
+              <Trash2 size={24} />
+            </div>
+            <div>
+              <h3 className="font-bold text-text-primary text-base">
+                Delete Branch?
+              </h3>
+              <p className="text-xs text-text-muted mt-1">
+                Are you sure you want to delete <span className="font-bold text-text-primary">{deletingBranchName}</span>? This action cannot be undone.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDeletingBranchId(null);
+                  setDeletingBranchName("");
+                }}
+                className="flex-1 py-2.5 rounded-xl border border-border text-xs font-bold text-text-muted hover:bg-slate-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteBranchConfirm}
+                disabled={isDeleting}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-xs font-bold shadow-md hover:bg-red-700 disabled:opacity-50 cursor-pointer"
+              >
+                {isDeleting ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── EDIT BRANCH MODAL ─────────────────────────────────── */}
       {editingBranchId && (

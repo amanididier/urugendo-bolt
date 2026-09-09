@@ -6,20 +6,6 @@
 // (see supabase/migrations/20260907120003_create_agency_managers.sql).
 // Agents are NOT in this table — they register publicly and are approved
 // by an active manager from the manager dashboard.
-//
-// This module:
-//   1. Loads a manager record by email from Supabase
-//   2. Verifies the password against the stored PBKDF2-SHA512 hash
-//   3. Confirms manager_code matches (defence in depth — same input that
-//      the login form collects from the user)
-//
-// The hash parameters (salt + iterations) must stay in sync with the
-// migration. The canonical manager record seeded in the migration is:
-//   email:        manager@virunga.com
-//   manager_code: MGR-001
-//   password:     manager@123
-//   password_hash: PBKDF2-SHA512("manager@123", "urugendo-manager-v1-salt",
-//                                100000, 64) → base64
 
 import { supabase } from "./supabase";
 
@@ -39,6 +25,7 @@ export interface ManagerLoginInput {
   email: string;
   managerCode: string;
   password: string;
+  agencyName?: string;
 }
 
 export interface ManagerLoginResult {
@@ -48,15 +35,18 @@ export interface ManagerLoginResult {
     | "not_found"
     | "inactive"
     | "code_mismatch"
+    | "agency_mismatch"
     | "bad_password";
   manager?: Omit<ManagerRecord, "passwordHash" | "passwordSalt">;
 }
 
-// Browser-side PBKDF2 via Web Crypto. Returns base64.
-async function pbkdf2(
+/**
+ * Browser-side PBKDF2 via Web Crypto (SHA-512). Returns base64 encoded string.
+ */
+export async function pbkdf2(
   password: string,
   salt: string,
-  iterations: number,
+  iterations: number = 100000,
 ): Promise<string> {
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey(
@@ -76,15 +66,34 @@ async function pbkdf2(
     keyMaterial,
     64 * 8, // 64 bytes
   );
-  // base64-encode the result
   const bytes = new Uint8Array(bits);
   let binary = "";
-  for (let i = 0; i < bytes.length; i++)
+  for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCharCode(bytes[i]);
+  }
   return btoa(binary);
 }
 
-// Constant-time string compare.
+/**
+ * Generate password hash and salt for developers to seed new managers into DB.
+ */
+export async function generateManagerPasswordHash(
+  password: string,
+  customSalt?: string,
+  iterations: number = 100000,
+): Promise<{ hash: string; salt: string; iterations: number }> {
+  const salt =
+    customSalt ||
+    "urugendo-mgr-" +
+      Array.from(crypto.getRandomValues(new Uint8Array(8)))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+
+  const hash = await pbkdf2(password, salt, iterations);
+  return { hash, salt, iterations };
+}
+
+// Constant-time string compare to prevent timing attacks.
 function constantTimeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
@@ -96,7 +105,6 @@ function constantTimeEqual(a: string, b: string): boolean {
 
 /**
  * Authenticate a manager against the agency_managers table.
- *
  * Returns { ok: true, manager } on success, otherwise { ok: false, reason }.
  */
 export async function authenticateManager(
@@ -130,7 +138,7 @@ export async function authenticateManager(
     email: data.email,
     managerCode: data.manager_code,
     agencyName: data.agency_name,
-    passwordHash: data.password_hash,
+    passwordHash: data.password_hash.trim(),
     passwordSalt: data.password_salt,
     passwordIter: data.password_iter || 100000,
     isActive: data.is_active !== false,
@@ -141,9 +149,18 @@ export async function authenticateManager(
   }
 
   if (
-    record.managerCode.toLowerCase() !== input.managerCode.trim().toLowerCase()
+    record.managerCode.trim().toLowerCase() !==
+    input.managerCode.trim().toLowerCase()
   ) {
     return { ok: false, reason: "code_mismatch" };
+  }
+
+  if (
+    input.agencyName &&
+    record.agencyName.trim().toLowerCase() !==
+      input.agencyName.trim().toLowerCase()
+  ) {
+    return { ok: false, reason: "agency_mismatch" };
   }
 
   const computed = await pbkdf2(
@@ -151,6 +168,7 @@ export async function authenticateManager(
     record.passwordSalt,
     record.passwordIter,
   );
+
   if (!constantTimeEqual(computed, record.passwordHash)) {
     return { ok: false, reason: "bad_password" };
   }
@@ -163,8 +181,68 @@ export async function authenticateManager(
 }
 
 /**
+ * Update manager password securely with PBKDF2 hashing in Supabase database.
+ */
+export async function updateManagerPassword(
+  managerId: string,
+  currentPassword: string,
+  newPassword: string,
+): Promise<{ ok: boolean; message: string }> {
+  if (!currentPassword || !newPassword) {
+    return { ok: false, message: "Current and new password are required." };
+  }
+  if (newPassword.length < 6) {
+    return { ok: false, message: "New password must be at least 6 characters." };
+  }
+
+  const { data, error } = await supabase
+    .from("agency_managers")
+    .select("password_hash, password_salt, password_iter")
+    .eq("id", managerId)
+    .single();
+
+  if (error || !data) {
+    return { ok: false, message: "Manager account record not found." };
+  }
+
+  const computedCurrent = await pbkdf2(
+    currentPassword,
+    data.password_salt,
+    data.password_iter || 100000,
+  );
+
+  if (!constantTimeEqual(computedCurrent, data.password_hash.trim())) {
+    return { ok: false, message: "Current password is incorrect." };
+  }
+
+  const newSalt =
+    "urugendo-mgr-" +
+    Array.from(crypto.getRandomValues(new Uint8Array(8)))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  const newIter = 100000;
+  const newHash = await pbkdf2(newPassword, newSalt, newIter);
+
+  const { error: updateError } = await supabase
+    .from("agency_managers")
+    .update({
+      password_hash: newHash,
+      password_salt: newSalt,
+      password_iter: newIter,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", managerId);
+
+  if (updateError) {
+    console.warn("[managerAuth] password update error:", updateError);
+    return { ok: false, message: "Database update failed. Please try again." };
+  }
+
+  return { ok: true, message: "Password updated successfully!" };
+}
+
+/**
  * Read the active manager record for the current session.
- * Returns null if no manager has signed in yet (no localStorage flag).
  */
 export function getStoredManagerId(): string | null {
   if (typeof window === "undefined") return null;
@@ -189,7 +267,7 @@ export function getStoredManager(): Omit<
     managerCode: code,
     agencyName: agency,
     isActive: true,
-    passwordIter: 10000,
+    passwordIter: 100000,
   };
 }
 
@@ -211,7 +289,7 @@ export function clearManagerSession() {
   localStorage.removeItem("urugendo_manager_name");
   localStorage.removeItem("urugendo_manager_email");
   localStorage.removeItem("urugendo_manager_code");
-  // Note: do NOT clear urugendo_agency — other roles may use it.
   localStorage.removeItem("urugendo_role");
-  localStorage.removeItem("urugendo_manager_password"); // legacy
+  localStorage.removeItem("urugendo_manager_password");
 }
+

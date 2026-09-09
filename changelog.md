@@ -753,3 +753,43 @@ The ticket page needs to look up `branches.phone` for the booking's branch. With
 
 **Last Updated**: 2026-09-07 (Batch 3 complete)
 **Updated By**: Claude (AI Assistant)
+
+---
+
+## Session: 2026-09-09 - Batches 4, 5, 6 & 7: Notifications, Manager Portal, Mobile Frame Fix & Scale (P1/P2)
+
+### Context
+
+Following the completion of Batches 1–3, the remaining tasks in the Production Readiness Fix Plan were completed:
+1. **Batch 4**: Event-triggered real notifications (`notificationsService.ts`) for ticket confirmations, delay alerts, payment verifications, and agent signups.
+2. **Batch 5**: Protected Manager App (`/manager`), real database authentication (`managerAuth.ts`), agency dropdown, and live branch revenue rollups.
+3. **Batch 6**: Visual fix in `ClientLayout.tsx` — mobile phone frame and Dynamic Island notch overlay restricted to desktop viewports (`hidden md:flex`) so real phones render clean native edge-to-edge UI.
+4. **Batch 7**: Performance optimization with top-of-page route transition progress bar (`RouteProgressBar.tsx`), in-memory client cache (`cache.ts`), and Supabase database indexes migration (`20260909100000_add_performance_indexes.sql`).
+
+---
+
+### Changes Summary
+
+| Batch | File(s) | Change & Purpose |
+|---|---|---|
+| **Batch 4** | `src/lib/notificationsService.ts` | Real notifications service powering delay alerts, booking confirmations, payment verifications, and manager notifications. |
+| **Batch 5** | `src/app/manager/page.tsx`, `src/lib/managerAuth.ts`, `supabase/migrations/20260907120003_create_agency_managers.sql` | Real database-backed manager authentication, agent approval management, and branch creation. |
+| **Batch 6** | `src/components/ClientLayout.tsx` | Restricted fake iPhone notch container to desktop viewports (`hidden md:flex`) so real phones display full screen without notch overlap. |
+| **Batch 7** | `src/components/RouteProgressBar.tsx`, `src/lib/cache.ts`, `supabase/migrations/20260909100000_add_performance_indexes.sql` | Route progress bar for smooth transition feedback; TTL cache utility for repeat reads; DB indexes on filter/join columns (`trips.branch_id`, `bookings.user_id`, `bookings.branch_id`, `bookings.trip_id`). |
+
+---
+
+### Verification Checklist
+
+- [x] `npx tsc --noEmit` exits with 0 compilation errors across all modules
+- [x] Mobile phone notch overlay hidden on mobile viewports (`hidden md:flex`)
+- [x] Route progress bar component integrated into `ClientLayout`
+- [x] Performance indexes migration created in `supabase/migrations/20260909100000_add_performance_indexes.sql`
+- [x] Memory cache utility (`cache.ts`) ready for client-side repeat queries
+- [x] All 7 Batches of `urugendo-production-fix-plan.md` now fully implemented
+
+---
+
+**Last Updated**: 2026-09-09 (All Batches 1–7 complete)
+**Updated By**: Antigravity (AI Assistant)
+
