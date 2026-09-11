@@ -36,13 +36,8 @@ interface OperatorOption {
   branches?: string[];
 }
 
-const DEFAULT_VIRUNGA_BRANCHES = [
-  "Musanze",
-  "Kigali",
-  "Rubavu",
-  "Nyagatare",
-  "Gicumbi",
-];
+// (removed) DEFAULT_VIRUNGA_BRANCHES — login now fetches real branches from public.branches
+// const DEFAULT_VIRUNGA_BRANCHES = [...];
 
 // Batch 5: manager credentials are no longer hardcoded — they're stored in
 // the public.agency_managers table and verified via src/lib/managerAuth.ts.
@@ -89,6 +84,8 @@ function LoginContent() {
   const [selectedBranch, setSelectedBranch] = useState<string>("");
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
   const branchFieldRef = useRef<HTMLDivElement>(null);
+  const [realBranchNames, setRealBranchNames] = useState<string[]>([]);
+  const [branchLoading, setBranchLoading] = useState(false);
 
   const [lockoutRemainingSecs, setLockoutRemainingSecs] = useState<number>(0);
 
@@ -202,6 +199,15 @@ function LoginContent() {
     setOperatorDropdownOpen(false);
     setSelectedBranch("");
     setBranchCodeInput("");
+    // Fetch real branches for this agency from public.branches (not operators.branches mock)
+    (async () => {
+      setBranchLoading(true);
+      try {
+        const { data } = await supabase.from("branches").select("name").eq("agency_name", op.name).order("name");
+        setRealBranchNames(((data as any[]) || []).map((r) => r.name));
+      } catch {}
+      setBranchLoading(false);
+    })();
   };
 
   const handleOperatorChange = (value: string) => {
@@ -212,10 +218,8 @@ function LoginContent() {
     setOperatorDropdownOpen(true);
   };
 
-  const availableBranches =
-    selectedOperator?.branches && selectedOperator.branches.length > 0
-      ? selectedOperator.branches
-      : [];
+  // Real branches from public.branches — empty when managers haven't added any yet (no mocks)
+  const availableBranches = realBranchNames;
 
   const getExpectedBranchCode = (
     operatorName: string,
@@ -292,7 +296,11 @@ function LoginContent() {
       setError("Please select your bus operator.");
       return;
     }
-    if (availableBranches.length > 0 && !selectedBranch) {
+    if (selectedOperator && availableBranches.length === 0) {
+      setError("No stations exist for this agency yet — your manager must add a branch first.");
+      return;
+    }
+    if (!selectedBranch) {
       setError("Please select your agency branch station.");
       return;
     }
@@ -662,7 +670,7 @@ function LoginContent() {
           </div>
         </div>
 
-        {selectedOperator && availableBranches.length > 0 && (
+        {selectedOperator && (
           <motion.div
             initial={{ opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
@@ -705,7 +713,9 @@ function LoginContent() {
               </button>
               {branchDropdownOpen && (
                 <div className="absolute z-30 mt-1.5 w-full bg-white border border-border rounded-2xl shadow-xl overflow-hidden divide-y divide-border/50 max-h-56 overflow-y-auto">
-                  {availableBranches.map((branch) => (
+                  {availableBranches.length === 0 ? (
+                    <div className="px-4 py-3 text-[13px] text-text-muted text-center">No stations yet — ask your manager to add a branch.</div>
+                  ) : availableBranches.map((branch) => (
                     <button
                       key={branch}
                       type="button"
