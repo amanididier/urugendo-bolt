@@ -3,12 +3,13 @@
 // Batch 5: DB-backed authentication for agency managers.
 //
 // Managers are provisioned in the public.agency_managers table.
-// Authentication is performed server-side via the Supabase Edge Function
-// "manager-auth" to avoid exposing password hashes/salts to the browser.
+// Authentication goes through Supabase Edge Function "manager-auth" via
+// supabase.functions.invoke so apikey/Authorization headers are injected
+// automatically (fixes 401s from raw fetch on both localhost and production).
 //
 // This module:
-//   1. Calls the manager-auth Edge Function to verify credentials
-//   2. Confirms manager_code matches (defence in depth)
+//   1. Calls the manager-auth Edge Function via SDK
+//   2. Falls back to legacy client-side PBKDF2 only if the function is absent
 //   3. Persists a minimal manager session in localStorage
 //
 // Developers can generate password hashes using the exported
@@ -112,18 +113,8 @@ function constantTimeEqual(a: string, b: string): boolean {
 }
 
 /**
- * Build the URL for the manager-auth Edge Function.
- */
-function getManagerAuthUrl(): string {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-  return supabaseUrl
-    ? `${supabaseUrl}/functions/v1/manager-auth`
-    : "";
-}
-
-/**
  * Authenticate a manager against the agency_managers table.
- * Returns { ok: true, manager } on success, otherwise { ok: false, reason }.
+ * Uses supabase.functions.invoke so apikey/Authorization are injected automatically.
  */
 export async function authenticateManager(
   input: ManagerLoginInput,
@@ -133,62 +124,41 @@ export async function authenticateManager(
   }
 
   const email = input.email.trim().toLowerCase();
-
-  // Optional agency name check is done locally before calling the server,
-  // but the real verification happens in the Edge Function.
-  if (input.agencyName && input.agencyName.trim()) {
-    // We will still verify against the server record; this is just defence-in-depth.
-  }
+  const managerCode = input.managerCode.trim();
+  const password = input.password;
+  const agencyName = input.agencyName?.trim() || undefined;
 
   try {
-    const url = getManagerAuthUrl();
-    if (!url) {
-      // Fallback: if we cannot determine the URL, fall back to legacy client-side
-      // verification for backward compatibility during migration.
-      console.warn(
-        "[managerAuth] Edge Function URL unavailable; falling back to client-side verification.",
-      );
-      return await authenticateManagerLegacy(input);
-    }
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email,
-        managerCode: input.managerCode.trim(),
-        password: input.password,
-        agencyName: input.agencyName?.trim(),
-      }),
+    const { data, error } = await supabase.functions.invoke("manager-auth", {
+      body: { email, managerCode, password, agencyName },
     });
 
-    if (!response.ok) {
-      const errBody = await response.json().catch(() => ({}));
-      return {
-        ok: false,
-        reason: (errBody as any).reason || "bad_password",
-      };
+    if (error) {
+      const reason = (data as any)?.reason || (error as any)?.context?.reason;
+      if (reason) return { ok: false, reason: reason as ManagerLoginResult["reason"] };
+      // If function not deployed / network error, fall back to legacy client path
+      const status = (error as any)?.context?.status ?? (error as any)?.status;
+      if (status === 404 || !data) {
+        console.warn("[managerAuth] Edge Function unavailable, falling back to legacy verify");
+        return await authenticateManagerLegacy(input);
+      }
+      return { ok: false, reason: "bad_password" };
     }
 
-    const body = await response.json();
-    if (body.ok && body.manager) {
+    const body: any = data;
+    if (body?.ok && body?.manager) {
       return { ok: true, manager: body.manager as Omit<ManagerRecord, "passwordHash" | "passwordSalt"> };
     }
-
-    return {
-      ok: false,
-      reason: (body as any).reason || "bad_password",
-    };
+    return { ok: false, reason: (body?.reason as ManagerLoginResult["reason"]) || "bad_password" };
   } catch (err) {
     console.error("[managerAuth] Edge Function call failed:", err);
-    // Fallback to legacy client-side verification if the server is unreachable
     return await authenticateManagerLegacy(input);
   }
 }
 
 /**
  * Legacy client-side PBKDF2 verification (fallback only).
- * This path is deprecated and should only be used when the Edge Function is unavailable.
+ * Deprecated — only used when the Edge Function is not deployed.
  */
 async function authenticateManagerLegacy(
   input: ManagerLoginInput,
