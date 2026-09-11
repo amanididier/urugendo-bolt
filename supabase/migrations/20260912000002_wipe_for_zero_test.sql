@@ -24,6 +24,9 @@ DELETE FROM public.operators WHERE name NOT IN ('Virunga Express','Fasta');
 DELETE FROM public.agency_managers WHERE email NOT IN ('manager@virunga.com','manager@fasta.com');
 -- routes: clear demo routes
 DELETE FROM public.routes;
+-- founder_admins: never delete founder (created by developer)
+-- (founder_admins is service_role-only; not touched by wipe)
+
 
 -- Verify
 SELECT 'operators' as tbl, count(*) FROM public.operators

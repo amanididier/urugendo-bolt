@@ -13,6 +13,8 @@ interface ClientLayoutProps {
 export function ClientLayout({ children }: ClientLayoutProps) {
   const pathname = usePathname();
 
+  const isFounder = !!pathname && pathname.startsWith("/founder");
+
   // Hide global passenger nav for manager and login routes
   const isNavHidden =
     !pathname ||
@@ -20,7 +22,17 @@ export function ClientLayout({ children }: ClientLayoutProps) {
     pathname.startsWith("/splash") ||
     pathname.startsWith("/user-login") ||
     pathname.startsWith("/agency/agency-login") ||
-    pathname.startsWith("/manager");
+    pathname.startsWith("/manager") ||
+    isFounder;
+
+  // Founder: full-bleed, no phone frame — responsive on mobile & desktop, Apple-clean.
+  if (isFounder) {
+    return (
+      <div className="min-h-screen bg-[#F8FAFC]">
+        <main className="min-h-screen">{children}</main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0F0F0F] flex items-center justify-center p-0 md:p-6">
@@ -34,13 +46,7 @@ export function ClientLayout({ children }: ClientLayoutProps) {
         </div>
 
         {/* Scrollable Screen Body */}
-        <main
-          className={`flex-1 overflow-y-auto relative ${
-            isNavHidden ? "pb-0" : "pb-[68px]"
-          }`}
-        >
-          {children}
-        </main>
+        <main className={`flex-1 overflow-y-auto relative ${isNavHidden ? "pb-0" : "pb-[68px]"}`}>{children}</main>
 
         {/* Global Passenger Nav & City Picker */}
         <BottomNav />

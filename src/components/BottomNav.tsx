@@ -44,14 +44,15 @@ export function BottomNav({ role }: BottomNavProps) {
   const pathname = usePathname();
   const router = useRouter();
 
-  // Instantly return null on splash, home root, login routes, or manager dashboard
+  // Instantly return null on splash, home root, login routes, manager dashboard, or founder studio
   if (
     !pathname ||
     pathname === "/" ||
     pathname.startsWith("/splash") ||
     pathname.startsWith("/user-login") ||
     pathname.startsWith("/agency/agency-login") ||
-    pathname.startsWith("/manager")
+    pathname.startsWith("/manager") ||
+    pathname.startsWith("/founder")
   ) {
     return null;
   }
