@@ -34,7 +34,37 @@ export async function authenticateFounder(input: {
     if (!res.ok) return { ok: false, reason: (body as any).reason || "bad_password" };
     if (body.ok && body.founder) return { ok: true, founder: body.founder as FounderSession };
     return { ok: false, reason: (body as any).reason || "bad_password" };
-  } catch (e) {
+  } catch {
+    return { ok: false, reason: "network_error" };
+  }
+}
+
+export async function updateFounderPassword(input: {
+  email: string;
+  currentPassword: string;
+  newPassword: string;
+}): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (!input.email?.trim() || !input.currentPassword || !input.newPassword) {
+    return { ok: false, reason: "missing_fields" };
+  }
+  if (input.newPassword.length < 6) return { ok: false, reason: "weak_password" };
+  const fnUrl = getFounderAuthUrl();
+  if (!fnUrl) return { ok: false, reason: "config_missing" };
+  try {
+    const res = await fetch(fnUrl + "?action=update_password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: input.email.trim().toLowerCase(),
+        currentPassword: input.currentPassword,
+        newPassword: input.newPassword,
+      }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, reason: (body as any).reason || "update_failed" };
+    if (body.ok) return { ok: true };
+    return { ok: false, reason: (body as any).reason || "update_failed" };
+  } catch {
     return { ok: false, reason: "network_error" };
   }
 }

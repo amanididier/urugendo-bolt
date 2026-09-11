@@ -21,9 +21,13 @@ import {
   BarChart3,
   Sparkles,
   ArrowUpRight,
+  Bell,
+  Eye,
+  EyeOff,
+  KeyRound,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { getFounderSession, clearFounderSession, authenticateFounder, persistFounderSession } from "@/lib/founderAuth";
+import { getFounderSession, clearFounderSession, authenticateFounder, persistFounderSession, updateFounderPassword } from "@/lib/founderAuth";
 import { generateManagerPasswordHash } from "@/lib/managerAuth";
 
 // Founder-only: hidden from sitemap, not linked anywhere, phone-frame exempt.
@@ -177,6 +181,103 @@ function StatCard({
   );
 }
 
+function FounderProfileCard({ email, name }: { email: string; name: string }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNext, setShowNext] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMsg(null);
+    if (!current || !next || !confirm) { setMsg({ kind: "err", text: "Please fill in all password fields." }); return; }
+    if (next !== confirm) { setMsg({ kind: "err", text: "New passwords do not match." }); return; }
+    if (next.length < 6) { setMsg({ kind: "err", text: "New password must be at least 6 characters." }); return; }
+    setSaving(true);
+    const res = await updateFounderPassword({ email, currentPassword: current, newPassword: next });
+    setSaving(false);
+    if (!res.ok) {
+      const map: Record<string, string> = { bad_password: "Current password is incorrect.", weak_password: "New password must be at least 6 characters.", missing_fields: "All fields are required." };
+      setMsg({ kind: "err", text: map[res.reason] || res.reason || "Update failed." });
+      return;
+    }
+    setMsg({ kind: "ok", text: "Password updated in DB. Use it next login." });
+    setCurrent(""); setNext(""); setConfirm("");
+  };
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-5">
+      <h3 className="text-[13px] font-black text-slate-900 flex items-center gap-2"><Crown size={16} /> Founder Profile</h3>
+      <div className="mt-3 rounded-xl bg-slate-50 border border-slate-200 px-3 py-3">
+        <div className="text-[13px] font-bold text-slate-900">{name}</div>
+        <div className="text-[12px] text-slate-600 break-all">{email}</div>
+        <div className="text-[11px] text-slate-500 mt-1">Password is PBKDF2-hashed in founder_admins. Change it here anytime — saved to DB for any device.</div>
+      </div>
+      <form onSubmit={submit} className="mt-4 space-y-3">
+        <p className="text-[11px] font-bold tracking-widest uppercase text-slate-500">Change password</p>
+        <div>
+          <label className="text-[11px] font-semibold text-slate-600">Current password</label>
+          <div className="relative mt-1">
+            <input type={showCurrent ? "text" : "password"} value={current} onChange={(e) => setCurrent(e.target.value)} placeholder="••••••••" className="w-full h-10 pr-10 pl-3 rounded-xl border border-slate-200 bg-white text-[13px] font-medium focus:outline-none focus:border-slate-900" />
+            <button type="button" onClick={() => setShowCurrent((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg hover:bg-slate-100">{showCurrent ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+          </div>
+        </div>
+        <div>
+          <label className="text-[11px] font-semibold text-slate-600">New password</label>
+          <div className="relative mt-1">
+            <input type={showNext ? "text" : "password"} value={next} onChange={(e) => setNext(e.target.value)} placeholder="At least 6 characters" className="w-full h-10 pr-10 pl-3 rounded-xl border border-slate-200 bg-white text-[13px] font-medium focus:outline-none focus:border-slate-900" />
+            <button type="button" onClick={() => setShowNext((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg hover:bg-slate-100">{showNext ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+          </div>
+        </div>
+        {next.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
+            <label className="text-[11px] font-semibold text-slate-600">Confirm new password</label>
+            <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Re-enter new password" className="mt-1 w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-[13px] font-medium focus:outline-none focus:border-slate-900" />
+          </motion.div>
+        )}
+        {msg && <p className={`text-[12px] font-semibold rounded-xl px-3 py-2 border ${msg.kind === "ok" ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-rose-700 bg-rose-50 border-rose-200"}`}>{msg.text}</p>}
+        <button disabled={saving} className="w-full h-10 rounded-xl bg-slate-900 text-white text-[13px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-60">{saving ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />} Update password</button>
+      </form>
+    </div>
+  );
+}
+
+function GrowthAlerts({ stats, prevStats }: { stats: { totalPassengers: number; totalBookings: number; totalVerifiedRevenue: number } | null; prevStats: { totalPassengers: number; totalBookings: number; totalVerifiedRevenue: number } | null; }) {
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  const storageKey = "urugendo_founder_growth_dismissed";
+  useEffect(() => { try { const raw = localStorage.getItem(storageKey); if (raw) setDismissed(JSON.parse(raw)); } catch {} }, []);
+  const dismiss = (id: string) => { const nxt = Array.from(new Set([...dismissed, id])); setDismissed(nxt); try { localStorage.setItem(storageKey, JSON.stringify(nxt)); } catch {} };
+  if (!stats || !prevStats) return null;
+  const alerts: { id: string; title: string; body: string }[] = [];
+  const dUsers = stats.totalPassengers - prevStats.totalPassengers;
+  if (dUsers > 0) {
+    const pct = prevStats.totalPassengers > 0 ? (dUsers / prevStats.totalPassengers) * 100 : 100;
+    if (dUsers >= 500 || pct >= 25) alerts.push({ id: `users:${stats.totalPassengers}`, title: "Users surged", body: `Passengers grew by ${dUsers.toLocaleString()} (${pct.toFixed(0)}%) — now ${stats.totalPassengers.toLocaleString()}.` });
+  }
+  const dBookings = stats.totalBookings - prevStats.totalBookings;
+  if (dBookings > 0) {
+    const pctB = prevStats.totalBookings > 0 ? (dBookings / prevStats.totalBookings) * 100 : 100;
+    if (dBookings >= 200 || pctB >= 25) alerts.push({ id: `bookings:${stats.totalBookings}`, title: "Bookings surged", body: `Bookings grew by ${dBookings.toLocaleString()} (${pctB.toFixed(0)}%) — now ${stats.totalBookings.toLocaleString()}.` });
+  }
+  const visible = alerts.filter((a) => !dismissed.includes(a.id));
+  if (visible.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      {visible.map((a) => (
+        <div key={a.id} className="flex items-start justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-3 py-3">
+          <div className="flex gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0"><Bell size={16} /></div>
+            <div><div className="text-[13px] font-black text-amber-900">{a.title}</div><div className="text-[12px] text-amber-800 leading-snug">{a.body}</div></div>
+          </div>
+          <button type="button" onClick={() => dismiss(a.id)} className="p-1.5 rounded-full hover:bg-amber-100 text-amber-700"><X size={16} /></button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
 // ---------- Dashboard ----------
 function FounderDashboard({
   session,
@@ -186,6 +287,7 @@ function FounderDashboard({
   onLogout: () => void;
 }) {
   const [stats, setStats] = useState<Stats | null>(null);
+  const [prevStats, setPrevStats] = useState<Stats | null>(null);
   const [agencies, setAgencies] = useState<{ id: string; name: string; branches?: string[] }[]>([]);
   const [managers, setManagers] = useState<{ id: string; name: string; email: string; agency_name: string; manager_code: string }[]>([]);
   const [popularTrips, setPopularTrips] = useState<{ route: string; count: number; price?: number }[]>([]);
@@ -239,7 +341,8 @@ function FounderDashboard({
         if (isVerified) verifiedRevenue += Number(b.fare_amount ?? b.trip?.price ?? 0);
       }
 
-      setStats({
+      setPrevStats((prev) => { try { const raw = localStorage.getItem("urugendo_founder_prev_stats"); if (raw && !prev) return JSON.parse(raw) as Stats; } catch {} return prev; });
+      const nextStats: Stats = {
         totalPassengers: passengerProfiles,
         totalAgents,
         totalManagers: (mgrs.data || []).length,
@@ -249,7 +352,9 @@ function FounderDashboard({
         totalBookings,
         totalVerifiedRevenue: verifiedRevenue,
         totalPendingAgents: pendingAgents,
-      });
+      };
+      try { localStorage.setItem("urugendo_founder_prev_stats", JSON.stringify(nextStats)); } catch {}
+      setStats(nextStats);
 
       // Popular trips by booking count
       const tripCounts: Record<string, { count: number; price: number; route: string }> = {};
@@ -380,6 +485,7 @@ function FounderDashboard({
       </div>
 
       <div className="mx-auto max-w-[1120px] px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+        <GrowthAlerts stats={stats ? { totalPassengers: stats.totalPassengers, totalBookings: stats.totalBookings, totalVerifiedRevenue: stats.totalVerifiedRevenue } : null} prevStats={prevStats ? { totalPassengers: prevStats.totalPassengers, totalBookings: prevStats.totalBookings, totalVerifiedRevenue: prevStats.totalVerifiedRevenue } : null} />
         {/* Stats */}
         <div>
           <h2 className="text-[12px] font-bold tracking-widest uppercase text-slate-500 flex items-center gap-2">
@@ -521,6 +627,7 @@ function FounderDashboard({
 
           {/* Loved trips & agency revenue */}
           <div className="space-y-6">
+            <FounderProfileCard email={session.email} name={session.name} />
             <div className="bg-white rounded-2xl border border-slate-200 p-5">
               <h3 className="text-[13px] font-black text-slate-900 flex items-center gap-2">
                 <Sparkles size={16} /> Most loved trips
