@@ -61,7 +61,7 @@ export default function PaymentPage() {
   const [state, setState] = useState<PayState>("idle");
   const [error, setError] = useState("");
   const [, setReferenceId] = useState("");
-  const [branchMomoCode, setBranchMomoCode] = useState("5129401");
+  const [branchMomoCode, setBranchMomoCode] = useState<string | null>(null);
 
   // Group booking modal state & dropdown toggle state
   const groupCount = search.passengers > 1 ? search.passengers : 1;
@@ -90,15 +90,36 @@ export default function PaymentPage() {
     }
   }, [isLoggedIn]);
 
-  // Load branch momo code from agency profile storage sync
+  // Load branch MoMo code: branch table is source of truth (set by manager), NULL means not yet configured
   useEffect(() => {
     const storedBranchMomo =
       localStorage.getItem("urugendo_branch_momo") ||
       localStorage.getItem("urugendo_momo_code");
-    if (storedBranchMomo) {
+    // Only use local cache if it looks like a real 6-7 digit code
+    if (storedBranchMomo && /^\d{6,7}$/.test(storedBranchMomo)) {
       setBranchMomoCode(storedBranchMomo);
     }
-  }, []);
+    // Then resolve from branches table via the trip's origin (from city)
+    const tripFrom = (selectedTrip as any)?.from || (selectedTrip as any)?.route_from || search?.from;
+    if (!tripFrom) return;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from("branches")
+          .select("momo_code")
+          .ilike("name", tripFrom)
+          .limit(1)
+          .maybeSingle();
+        if (data?.momo_code && /^\d{6,7}$/.test(data.momo_code)) {
+          setBranchMomoCode(data.momo_code);
+          localStorage.setItem("urugendo_branch_momo", data.momo_code);
+        } else if (data && !data.momo_code) {
+          // Explicitly NULL — manager hasn't set MoMo for this branch yet
+          setBranchMomoCode(null);
+        }
+      } catch {}
+    })();
+  }, [selectedTrip, search?.from]);
 
   useEffect(() => {
     if (userName && !editablePassengerName) {
@@ -618,7 +639,7 @@ export default function PaymentPage() {
           </span>
         </div>
         <div className="text-[26px] font-black tracking-tight mb-1 font-mono">
-          {branchMomoCode}
+          {branchMomoCode ? `*${branchMomoCode}#` : "— Not yet set"}
         </div>
         <p className="text-[12px] font-semibold text-slate-800 opacity-90">
           {language === "RW"
@@ -701,7 +722,8 @@ export default function PaymentPage() {
             state === "initiating" ||
             state === "awaiting_approval" ||
             state === "polling" ||
-            !phone
+            !phone ||
+            !branchMomoCode
           }
           className={`w-full h-14 rounded-2xl font-extrabold text-[15px] flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg ${
             state === "initiating" ||

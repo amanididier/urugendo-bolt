@@ -133,7 +133,7 @@ function AgencyScheduleContent() {
     const localMomo =
       localStorage.getItem(`momo_code_${branch.toLowerCase()}`) ||
       localStorage.getItem("urugendo_branch_momo") ||
-      "5129401";
+      "";
 
     setForm((prev) => ({
       ...prev,
@@ -151,8 +151,8 @@ function AgencyScheduleContent() {
           const formatted = dbBranches.map(
             (b: { name: string; momo_code: string }) => ({
               terminal: b.name,
-              code: b.momo_code || "0000000",
-              ussd: `*182*8*1*${b.momo_code || "0000000"}#`,
+              code: b.momo_code || "",
+              ussd: `*182*8*1*${b.momo_code || ""}#`,
             }),
           );
           setMomoBranchCodes(formatted);

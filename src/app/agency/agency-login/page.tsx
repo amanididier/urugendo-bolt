@@ -215,9 +215,7 @@ function LoginContent() {
   const availableBranches =
     selectedOperator?.branches && selectedOperator.branches.length > 0
       ? selectedOperator.branches
-      : selectedOperator?.name.toLowerCase().includes("virunga")
-        ? DEFAULT_VIRUNGA_BRANCHES
-        : [];
+      : [];
 
   const getExpectedBranchCode = (
     operatorName: string,
@@ -353,6 +351,8 @@ function LoginContent() {
             name: fullName,
             email,
             branch_name: selectedBranch,
+            agency_name: selectedOperator.name,
+            agency_id: selectedOperator.id,
             phone: "+250 780 000 000",
             is_approved: false,
           });
@@ -630,26 +630,20 @@ function LoginContent() {
               size={18}
               className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted z-10"
             />
-            <input
-              type="text"
-              value={operatorQuery}
-              onChange={(e) => handleOperatorChange(e.target.value)}
-              onFocus={() => setOperatorDropdownOpen(true)}
-              onBlur={() =>
-                setTimeout(() => setOperatorDropdownOpen(false), 150)
-              }
-              placeholder="Select or type operator..."
-              className="w-full h-12 pl-10 pr-10 rounded-xl border border-border bg-white text-[14px] focus:outline-none focus:border-primary transition-all font-medium"
-            />
-            {selectedOperator && (
-              <Check
-                size={18}
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-primary"
-              />
-            )}
-            {operatorDropdownOpen && filteredOperators.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setOperatorDropdownOpen(!operatorDropdownOpen)}
+              onBlur={() => setTimeout(() => setOperatorDropdownOpen(false), 150)}
+              className="w-full h-12 pl-10 pr-10 text-left rounded-xl border border-border bg-white text-[14px] font-medium text-text-primary focus:outline-none focus:border-primary flex items-center justify-between cursor-pointer"
+            >
+              <span className={operatorQuery ? "text-text-primary font-semibold" : "text-text-muted"}>
+                {operatorQuery || "Select your agency..."}
+              </span>
+              <ChevronDown size={18} className={`text-text-muted transition-transform duration-200 ${operatorDropdownOpen ? "rotate-180" : ""}`} />
+            </button>
+            {operatorDropdownOpen && (
               <div className="absolute z-30 mt-1.5 w-full bg-white border border-border rounded-2xl shadow-xl overflow-hidden divide-y divide-border/50">
-                {filteredOperators.map((op) => (
+                {operators.map((op) => (
                   <button
                     key={op.id}
                     type="button"
@@ -660,9 +654,7 @@ function LoginContent() {
                       <Building2 size={16} className="text-text-muted" />
                       {op.name}
                     </span>
-                    {selectedOperator?.id === op.id && (
-                      <Check size={16} className="text-primary" />
-                    )}
+                    {selectedOperator?.id === op.id && <Check size={16} className="text-primary" />}
                   </button>
                 ))}
               </div>

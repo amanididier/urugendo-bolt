@@ -281,17 +281,20 @@ export default function AgencyManagerApp() {
 
   // ── Load data from Supabase ────────────────────────────────────────
   const loadData = useCallback(async () => {
-    // Fetch branches from DB
-    const dbBranches = await fetchAgencyBranches();
+    const agencyName = session?.agencyName;
+    // Fetch only this agency's branches — branch isolation by parent
+    const dbBranches = await fetchAgencyBranches(agencyName);
     setBranches(dbBranches);
 
-    // Fetch unapproved agents from DB
+    // Fetch unapproved agents for this agency only
     try {
-      const { data: agentData, error: agentErr } = await supabase
+      let q = supabase
         .from("agency_agents")
         .select("id, name, email, branch_name, phone, created_at")
         .eq("is_approved", false)
         .order("created_at", { ascending: false });
+      if (agencyName) q = q.eq("agency_name", agencyName);
+      const { data: agentData, error: agentErr } = await q;
 
       if (agentErr) {
         console.warn("[manager] agents fetch error:", agentErr.message);
@@ -310,7 +313,7 @@ export default function AgencyManagerApp() {
     } catch (err) {
       console.warn("[manager] pending agents fetch error:", err);
     }
-  }, []);
+  }, [session?.agencyName]);
 
   useEffect(() => {
     if (checkingSession) return;
@@ -480,7 +483,8 @@ export default function AgencyManagerApp() {
       id: crypto.randomUUID(),
       name: newBranchNameInput,
       location: newBranchLocationInput,
-      momoCode: newBranchMomoInput,
+      agencyName: session?.agencyName || undefined,
+      momoCode: newBranchMomoInput || null,
       phone: newBranchPhoneInput,
       agentName: "Assigned Agent",
       agentEmail: "agent@virunga.rw",
@@ -611,7 +615,7 @@ export default function AgencyManagerApp() {
 
   const openBranchEditor = (branch: BranchRecord) => {
     setEditingBranchId(branch.id);
-    setNewMomoInput(branch.momoCode);
+    setNewMomoInput(branch.momoCode ?? "");
     setNewPhoneInput(branch.phone || "");
     setMomoError("");
   };

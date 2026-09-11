@@ -9,7 +9,8 @@ export interface BranchRecord {
   id: string;
   name: string;
   location: string;
-  momoCode: string;
+  agencyName?: string | null;
+  momoCode: string | null;
   phone: string;
   agentName: string;
   agentEmail: string;
@@ -19,9 +20,11 @@ export interface BranchRecord {
 /**
  * Fetch all agency branches from Supabase database
  */
-export async function fetchAgencyBranches(): Promise<BranchRecord[]> {
+export async function fetchAgencyBranches(agencyName?: string): Promise<BranchRecord[]> {
   try {
-    const { data, error } = await supabase.from("branches").select("*");
+    let query = supabase.from("branches").select("*");
+    if (agencyName) query = query.eq("agency_name", agencyName);
+    const { data, error } = await query;
     if (error || !data) {
       console.warn("[branchService] error fetching branches:", error);
       return [];
@@ -31,7 +34,8 @@ export async function fetchAgencyBranches(): Promise<BranchRecord[]> {
       id: b.id,
       name: b.name,
       location: b.location,
-      momoCode: b.momo_code,
+      agencyName: b.agency_name ?? null,
+      momoCode: b.momo_code ?? null,
       phone: b.phone,
       agentName: b.agent_name,
       agentEmail: b.agent_email,
@@ -113,16 +117,18 @@ export async function fetchBranchRevenue(
  */
 export async function createNewBranch(branch: BranchRecord): Promise<boolean> {
   try {
-    const { error } = await supabase.from("branches").insert({
+    const payload: Record<string, any> = {
       id: branch.id,
       name: branch.name,
       location: branch.location,
-      momo_code: branch.momoCode,
+      momo_code: branch.momoCode ?? null,
       phone: branch.phone,
       agent_name: branch.agentName,
       agent_email: branch.agentEmail,
       stats: branch.stats,
-    });
+    };
+    if (branch.agencyName) payload.agency_name = branch.agencyName;
+    const { error } = await supabase.from("branches").insert(payload);
 
     if (error) {
       console.warn("[branchService] error creating branch:", error);
