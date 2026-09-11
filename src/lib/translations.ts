@@ -19,6 +19,7 @@ type TranslationKey =
   | "rugendoHelp"
   | "cities"
   | "operators"
+  | "agencies"
   | "madeWith"
   | "busesFound"
   | "perSeat"
@@ -114,7 +115,7 @@ const translations: Record<TranslationKey, Record<Language, string>> = {
   to: { EN: "To", RW: "Kujya" },
   toPlaceholder: { EN: "To (e.g. Musanze)", RW: "Kujya (urugero: Musanze)" },
   searchBuses: { EN: "Search Buses", RW: "Shakisha Bisi" },
-  popularRoutes: { EN: "Popular Routes", RW: "Inzira Zikunda" },
+  popularRoutes: { EN: "Popular Routes", RW: "Ingendo zikunzwe" },
   seeAll: { EN: "See all", RW: "Reba byose" },
   liveDepartures: { EN: "Live Departures", RW: "Gusohoka Mu Gihe" },
   live: { EN: "Live", RW: "Ubuzima" },
@@ -124,11 +125,12 @@ const translations: Record<TranslationKey, Record<Language, string>> = {
     EN: "Ask me about routes, prices, or booking help",
     RW: "Mbazanye ku nzira, ibiciro, cyangwa ubufasha bwo gutumiza",
   },
-  cities: { EN: "8 Cities", RW: "Umudugudu 8" },
-  operators: { EN: "4 Operators", RW: "Abakozi 4" },
+  cities: { EN: "Cities", RW: "imijyi" },
+  agencies: { EN: "Agencies", RW: "ibigo" },
+  operators: { EN: "Agencies", RW: "ibigo" },
   madeWith: {
     EN: "Made with 💚 for Rwanda's travellers",
-    RW: "Yakozwe n'💚 ku bagenzi b'u Rwanda",
+    RW: "Yakoranywe 💚 ku bw'abagenzi",
   },
 
   // Search
@@ -187,8 +189,8 @@ const translations: Record<TranslationKey, Record<Language, string>> = {
     EN: "Manage your bus tickets",
     RW: "Genzura amakarita yawe ya bisi",
   },
-  upcoming: { EN: "Upcoming", RW: "Biraza" },
-  past: { EN: "Past", RW: "Byashize" },
+  upcoming: { EN: "Upcoming", RW: "izitarakoreshwa" },
+  past: { EN: "Past", RW: "izakoreshejwe" },
   cancelled: { EN: "Cancelled", RW: "Byavanywemo" },
   noUpcoming: {
     EN: "No upcoming trips. Book your next journey!",
@@ -230,9 +232,9 @@ const translations: Record<TranslationKey, Record<Language, string>> = {
   // Splash
   tagline: {
     EN: "Your personal secure journey app",
-    RW: "Porogaramu yawe y'urugendo rwizewe",
+    RW: "Porogaramu yizewe y'ingendo.",
   },
-  getStarted: { EN: "Get Started", RW: "Tangira" },
+  getStarted: { EN: "Book a Ticket", RW: "Gura itike" },
   orContinue: { EN: "or continue with", RW: "cyangwa komereza na" },
   noAccount: { EN: "Don't have an account? ", RW: "Ufite konti? " },
   createOne: { EN: "Create one", RW: "Fungura konti" },

@@ -123,7 +123,7 @@ export default function TicketsPage() {
             const notifKey = `urugendo_completed_referral_${booking.id}`;
             if (!localStorage.getItem(notifKey)) {
               localStorage.setItem(notifKey, "true");
-              const shareLink = `${window.location.origin}/?ref=urugendo_${booking.id}`;
+              const shareLink = `https://urugendo-v0.vercel.app/?ref=urugendo_${booking.id}`;
 
               const isFirstTrip = index === loadedBookings.length - 1;
               const msg =
@@ -135,6 +135,18 @@ export default function TicketsPage() {
                     ? `✨ Loved the experience? Booking your journey through Urugendo is just the beginning! Share the smooth ride with your friends and family using your personal invite link: ${shareLink}`
                     : `🌟 Another destination reached safely! If Urugendo made your travel effortless today, spread the love with your friends: ${shareLink}`;
 
+              // Also fire a system-level browser notification (visible even when app is in background / swipe-down tray)
+              try {
+                if (typeof window !== "undefined" && "Notification" in window) {
+                  if (Notification.permission === "granted") {
+                    new Notification(isFirstTrip ? "Trip Completed!" : "Destination Reached!", { body: msg, icon: "/icon-192.png" });
+                  } else if (Notification.permission !== "denied") {
+                    Notification.requestPermission().then((perm) => {
+                      if (perm === "granted") new Notification(isFirstTrip ? "Trip Completed!" : "Destination Reached!", { body: msg, icon: "/icon-192.png" });
+                    });
+                  }
+                }
+              } catch {}
               addUserNotification({
                 title:
                   language === "RW"

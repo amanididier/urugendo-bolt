@@ -13,13 +13,16 @@ import {
   Zap,
   Navigation,
   Search,
+  Building2,
 } from "lucide-react";
 import { useApp } from "@/context/app-context";
-import { popularRoutes, formatPrice } from "@/lib/data";
-import { fetchTrips } from "@/lib/api";
+import { supabase } from "@/lib/supabase";
+import { formatPrice, fetchDatabaseBranches } from "@/lib/data";
+import { fetchTrips, fetchPopularRoutes } from "@/lib/api";
+import type { Trip } from "@/lib/types";
+import { Route } from "@/lib/types";
 import { t } from "@/lib/translations";
 import { useNotifications } from "@/lib/notifications";
-import type { Trip } from "@/lib/types";
 
 export default function HomePage() {
   const router = useRouter();
@@ -36,18 +39,10 @@ export default function HomePage() {
   const { unreadCount } = useNotifications();
   const [currentLocation, setCurrentLocation] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
-  const [liveTrips, setLiveTrips] = useState<Trip[]>([]);
   const [showPopup, setShowPopup] = useState(false);
-
-  const liveRoutes = popularRoutes.slice(0, 3);
-
-  useEffect(() => {
-    async function loadLiveTrips() {
-      const data = await fetchTrips(search.from, search.to, search.date);
-      setLiveTrips(data);
-    }
-    loadLiveTrips();
-  }, [search.from, search.to, search.date]);
+  const [cityCount, setCityCount] = useState<number>(0);
+  const [agencyCount, setAgencyCount] = useState<number>(0);
+  const [homePopularRoutes, setHomePopularRoutes] = useState<Route[]>([]);
 
   const openCityPicker = (field: "from" | "to") => {
     setCityPickerField(field);
@@ -70,18 +65,13 @@ export default function HomePage() {
     }
   };
 
-  const handleRouteClick = (route: (typeof popularRoutes)[0]) => {
+  const handleRouteClick = (route: Route) => {
     if (route.status === "coming_soon") {
       setShowPopup(true);
       return;
     }
     setSearch({ from: route.from, to: route.to });
     router.push("/search");
-  };
-
-  const handleLiveDeparture = (trip: Trip) => {
-    setSelectedTrip(trip);
-    router.push(`/seats/${trip.id}`);
   };
 
   const useMyLocation = () => {
@@ -104,6 +94,38 @@ export default function HomePage() {
         () => {},
       );
     }
+  }, []);
+
+  // Load dynamic stats for home page
+  useEffect(() => {
+    async function loadHomeStats() {
+      try {
+        // Get branches count (cities covered)
+        const branches = await fetchDatabaseBranches();
+        const cityCount = new Set(branches.map(b => b.split(',')[0].trim())).size; // Simplified distinct cities
+
+        // Get agencies count (operators)
+        const { data: operatorsData } = await supabase
+          .from("operators")
+          .select("id");
+        const agencyCount = operatorsData?.length || 0;
+
+        setCityCount(cityCount > 0 ? cityCount : 5); // fallback
+        setAgencyCount(agencyCount > 0 ? agencyCount : 3); // fallback
+
+        // Get popular routes for home page (top 3 by some criteria - for now just get some routes)
+        const popularRoutesData = await fetchPopularRoutes();
+        setHomePopularRoutes(popularRoutesData.slice(0, 3));
+      } catch (error) {
+        console.error("Failed to load home stats:", error);
+        // Set fallbacks
+        setCityCount(5);
+        setAgencyCount(3);
+        setHomePopularRoutes([]);
+      }
+    }
+
+    loadHomeStats();
   }, []);
 
   return (
@@ -308,13 +330,13 @@ export default function HomePage() {
         {[
           {
             icon: <MapPin size={14} />,
-            label: t("cities", language),
+            label: `${cityCount} ${t("cities", language)}`,
             bg: "bg-primary-light",
             color: "text-primary",
           },
           {
-            icon: <Zap size={14} />,
-            label: t("operators", language),
+            icon: <Building2 size={14} />,
+            label: `${agencyCount} ${t("agencies", language)}`,
             bg: "bg-amber-50",
             color: "text-accent",
           },
@@ -359,7 +381,7 @@ export default function HomePage() {
           className="flex gap-3 px-5 overflow-x-auto pb-1"
           style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
         >
-          {popularRoutes.map((route, i) => (
+          {homePopularRoutes.map((route, i) => (
             <motion.button
               key={route.id}
               initial={{ opacity: 0, y: 10 }}
@@ -415,112 +437,6 @@ export default function HomePage() {
               )}
             </motion.button>
           ))}
-        </div>
-      </motion.div>
-
-      {/* Live Departures */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.35 }}
-        className="px-4 mb-6"
-      >
-        <div className="flex items-center gap-2 mb-3">
-          <div className="w-1 h-5 rounded-full bg-primary" />
-          <h3 className="text-[17px] font-bold text-text-primary">
-            {t("liveDepartures", language)}
-          </h3>
-          <div className="flex items-center gap-1 bg-badge-green-bg px-2 py-0.5 rounded-full">
-            <motion.div
-              animate={{ opacity: [1, 0.2, 1] }}
-              transition={{ duration: 1.4, repeat: Infinity }}
-              className="w-1.5 h-1.5 rounded-full bg-badge-green-text"
-            />
-            <span className="text-[11px] font-bold text-badge-green-text">
-              {t("live", language)}
-            </span>
-          </div>
-        </div>
-
-        <div className="space-y-2.5">
-          {liveTrips.length > 0
-            ? liveTrips.slice(0, 4).map((trip, i) => {
-                const op = trip.operator as any;
-                const operatorName =
-                  typeof op === "string" ? op : op?.name || "Bus Operator";
-                const operatorGradient =
-                  typeof op === "object" && op?.gradient
-                    ? op.gradient
-                    : "linear-gradient(135deg, #FF6B1A, #FF8800)";
-                const operatorIcon =
-                  typeof op === "object" && (op?.emoji || op?.logo)
-                    ? op.emoji || op.logo
-                    : "🚌";
-
-                return (
-                  <motion.button
-                    key={trip.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.4 + i * 0.06 }}
-                    onClick={() => handleLiveDeparture(trip)}
-                    className="w-full bg-white rounded-2xl border border-border p-3.5 flex items-center gap-3 active:scale-[0.98] active:bg-primary-light transition-all shadow-card text-left cursor-pointer"
-                  >
-                    <div
-                      className="w-11 h-11 rounded-2xl flex items-center justify-center text-lg flex-shrink-0"
-                      style={{ background: operatorGradient }}
-                    >
-                      {operatorIcon}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[14px] font-bold text-text-primary">
-                        {trip.from} → {trip.to}
-                      </div>
-                      <div className="text-[12px] text-text-muted mt-0.5">
-                        <span className="text-primary font-semibold">
-                          {operatorName}
-                        </span>
-                        <span className="mx-1.5">·</span>
-                        <span>{trip.departureTime}</span>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[16px] font-extrabold text-primary">
-                        {formatPrice(trip.price)}
-                      </div>
-                      <div className="text-[11px] text-badge-green-text font-medium">
-                        {trip.availableSeats} {t("seats", language)}
-                      </div>
-                    </div>
-                  </motion.button>
-                );
-              })
-            : liveRoutes.map((route) => (
-                <div
-                  key={route.id}
-                  onClick={() => handleRouteClick(route)}
-                  className="w-full bg-white rounded-2xl border border-border p-3.5 flex items-center justify-between shadow-card cursor-pointer"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-2xl bg-orange-100 flex items-center justify-center text-xl">
-                      🚌
-                    </div>
-                    <div>
-                      <div className="text-[14px] font-bold text-text-primary">
-                        {route.from} → {route.to}
-                      </div>
-                      <div className="text-[12px] text-text-muted">
-                        {route.duration}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-[16px] font-extrabold text-primary">
-                      {formatPrice(route.price)}
-                    </div>
-                  </div>
-                </div>
-              ))}
         </div>
       </motion.div>
 

@@ -208,7 +208,7 @@ export default function SplashScreen() {
               onClick={continueAsPassenger}
               className="w-full flex items-center justify-center gap-2 p-3.5 rounded-2xl bg-primary active:scale-[0.98] transition-transform text-white font-bold text-[15px] shadow-lg cursor-pointer"
             >
-              Book a Ticket
+              {t("getStarted", language)}
               <ArrowRight size={18} />
             </motion.button>
           </motion.div>

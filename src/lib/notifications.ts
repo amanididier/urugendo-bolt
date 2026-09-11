@@ -77,7 +77,7 @@ export function addUserNotification(
   ) {
     new Notification(newNotification.title, {
       body: newNotification.message,
-      icon: "/icon.png",
+      icon: "/icon-192.png",
     });
   }
 }

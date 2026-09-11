@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import type { Trip, Booking } from "./types";
+import type { Trip, Booking, Route } from "./types";
 
 // Normalize phone numbers for MTN MoMo payments (Rwanda format handling)
 export function normalizePhone(phone: string): string | null {
@@ -168,6 +168,69 @@ export async function fetchTrip(id: string): Promise<Trip | null> {
 // Fetch trips specifically by date (Used by Agency Dashboard)
 export async function fetchTripsByDate(date?: string): Promise<Trip[]> {
   return fetchTrips(undefined, undefined, date);
+}
+
+// Fetch popular routes for home page (top routes by booking count)
+export async function fetchPopularRoutes(): Promise<Route[]> {
+  try {
+    // Prefer popularity ranking: count bookings per route, join against trips if route_id present; fallback to base_price ordering.
+    const { data: bookingCounts } = await supabase
+      .from("bookings")
+      .select("trip_id");
+    let popularRouteOrder: string[] | null = null;
+    if (bookingCounts && bookingCounts.length > 0) {
+      const tripIds = bookingCounts.map((b: any) => b.trip_id).filter(Boolean);
+      if (tripIds.length > 0) {
+        const { data: tripsForRoutes } = await supabase
+          .from("trips")
+          .select("id, route_from, route_to")
+          .in("id", tripIds.slice(0, 500));
+        if (tripsForRoutes && tripsForRoutes.length > 0) {
+          const freq: Record<string, number> = {};
+          for (const tr of tripsForRoutes as any[]) {
+            const key = `${tr.route_from}__${tr.route_to}`;
+            freq[key] = (freq[key] || 0) + 1;
+          }
+          popularRouteOrder = Object.entries(freq)
+            .sort((a, b) => b[1] - a[1])
+            .map(([k]) => k);
+        }
+      }
+    }
+    const { data, error } = await supabase
+      .from("routes")
+      .select("*")
+      .order("base_price", { ascending: true })
+      .limit(5);
+
+    if (error || !data) {
+      console.warn("[api] fetchPopularRoutes error:", error?.message);
+      return [];
+    }
+
+    let mapped = data.map((r: any) => ({
+      id: r.id,
+      from: r.from_city,
+      to: r.to_city,
+      price: r.base_price || 2500,
+      duration: r.duration_minutes
+        ? `${Math.floor(r.duration_minutes / 60)}h ${r.duration_minutes % 60}0m`
+        : "2h 30m",
+      status: "active" as const,
+    }));
+    if (popularRouteOrder && popularRouteOrder.length > 0) {
+      const rank = (r: any) => {
+        const key = `${r.from}__${r.to}`;
+        const idx = popularRouteOrder!.indexOf(key);
+        return idx === -1 ? 999 : idx;
+      };
+      mapped.sort((a: any, b: any) => rank(a) - rank(b));
+    }
+    return mapped as Route[];
+  } catch (err) {
+    console.error("fetchPopularRoutes failed:", err);
+    return [];
+  }
 }
 
 // Create a new trip/departure in Supabase matching table constraints

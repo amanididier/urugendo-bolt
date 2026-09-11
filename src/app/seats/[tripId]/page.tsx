@@ -359,7 +359,7 @@ export default function SeatSelectionPage() {
             }`}
           >
             {isSelectionComplete
-              ? `Select (${selectedSeats.join(", ")})`
+              ? `${t("select", language)} (${selectedSeats.join(", ")})`
               : "Select seats to continue"}
           </button>
         </div>

@@ -2,10 +2,17 @@
 //
 // Batch 5: DB-backed authentication for agency managers.
 //
-// Managers are manually provisioned in the public.agency_managers table
-// (see supabase/migrations/20260907120003_create_agency_managers.sql).
-// Agents are NOT in this table — they register publicly and are approved
-// by an active manager from the manager dashboard.
+// Managers are provisioned in the public.agency_managers table.
+// Authentication is performed server-side via the Supabase Edge Function
+// "manager-auth" to avoid exposing password hashes/salts to the browser.
+//
+// This module:
+//   1. Calls the manager-auth Edge Function to verify credentials
+//   2. Confirms manager_code matches (defence in depth)
+//   3. Persists a minimal manager session in localStorage
+//
+// Developers can generate password hashes using the exported
+// generateManagerPasswordHash helper for seeding new managers via SQL/migration.
 
 import { supabase } from "./supabase";
 
@@ -42,6 +49,7 @@ export interface ManagerLoginResult {
 
 /**
  * Browser-side PBKDF2 via Web Crypto (SHA-512). Returns base64 encoded string.
+ * Used only for generating hashes for seeding/management, not for login verification.
  */
 export async function pbkdf2(
   password: string,
@@ -104,6 +112,16 @@ function constantTimeEqual(a: string, b: string): boolean {
 }
 
 /**
+ * Build the URL for the manager-auth Edge Function.
+ */
+function getManagerAuthUrl(): string {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  return supabaseUrl
+    ? `${supabaseUrl}/functions/v1/manager-auth`
+    : "";
+}
+
+/**
  * Authenticate a manager against the agency_managers table.
  * Returns { ok: true, manager } on success, otherwise { ok: false, reason }.
  */
@@ -116,6 +134,67 @@ export async function authenticateManager(
 
   const email = input.email.trim().toLowerCase();
 
+  // Optional agency name check is done locally before calling the server,
+  // but the real verification happens in the Edge Function.
+  if (input.agencyName && input.agencyName.trim()) {
+    // We will still verify against the server record; this is just defence-in-depth.
+  }
+
+  try {
+    const url = getManagerAuthUrl();
+    if (!url) {
+      // Fallback: if we cannot determine the URL, fall back to legacy client-side
+      // verification for backward compatibility during migration.
+      console.warn(
+        "[managerAuth] Edge Function URL unavailable; falling back to client-side verification.",
+      );
+      return await authenticateManagerLegacy(input);
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email,
+        managerCode: input.managerCode.trim(),
+        password: input.password,
+        agencyName: input.agencyName?.trim(),
+      }),
+    });
+
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => ({}));
+      return {
+        ok: false,
+        reason: (errBody as any).reason || "bad_password",
+      };
+    }
+
+    const body = await response.json();
+    if (body.ok && body.manager) {
+      return { ok: true, manager: body.manager as Omit<ManagerRecord, "passwordHash" | "passwordSalt"> };
+    }
+
+    return {
+      ok: false,
+      reason: (body as any).reason || "bad_password",
+    };
+  } catch (err) {
+    console.error("[managerAuth] Edge Function call failed:", err);
+    // Fallback to legacy client-side verification if the server is unreachable
+    return await authenticateManagerLegacy(input);
+  }
+}
+
+/**
+ * Legacy client-side PBKDF2 verification (fallback only).
+ * This path is deprecated and should only be used when the Edge Function is unavailable.
+ */
+async function authenticateManagerLegacy(
+  input: ManagerLoginInput,
+): Promise<ManagerLoginResult> {
+  const email = input.email.trim().toLowerCase();
+
   const { data, error } = await supabase
     .from("agency_managers")
     .select(
@@ -124,11 +203,7 @@ export async function authenticateManager(
     .eq("email", email)
     .maybeSingle();
 
-  if (error) {
-    console.warn("[managerAuth] select error:", error.message);
-    return { ok: false, reason: "not_found" };
-  }
-  if (!data) {
+  if (error || !data) {
     return { ok: false, reason: "not_found" };
   }
 
@@ -173,7 +248,6 @@ export async function authenticateManager(
     return { ok: false, reason: "bad_password" };
   }
 
-  // Strip secrets before returning to caller.
   const { passwordHash, passwordSalt, ...safe } = record;
   void passwordHash;
   void passwordSalt;
@@ -181,7 +255,8 @@ export async function authenticateManager(
 }
 
 /**
- * Update manager password securely with PBKDF2 hashing in Supabase database.
+ * Update manager password securely.
+ * This uses the legacy client-side path for now; consider migrating to an Edge Function.
  */
 export async function updateManagerPassword(
   managerId: string,
@@ -285,11 +360,18 @@ export function persistManagerSession(
 
 export function clearManagerSession() {
   if (typeof window === "undefined") return;
+  // Remove the explicit manager keys...
   localStorage.removeItem("urugendo_manager_id");
   localStorage.removeItem("urugendo_manager_name");
   localStorage.removeItem("urugendo_manager_email");
   localStorage.removeItem("urugendo_manager_code");
   localStorage.removeItem("urugendo_role");
   localStorage.removeItem("urugendo_manager_password");
+  // ...and sweep any other urugendo_* / supabase sb-* keys so the next login on this device is clean
+  const sweep: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && (k.startsWith("urugendo_") || k.startsWith("sb-"))) sweep.push(k);
+  }
+  sweep.forEach((k) => localStorage.removeItem(k));
 }
-

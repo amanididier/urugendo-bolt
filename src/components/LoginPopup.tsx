@@ -16,6 +16,10 @@ import {
 import { useRouter } from "next/navigation";
 import { useApp } from "@/context/app-context";
 import { supabase } from "@/lib/supabase";
+import {
+  authenticateManager,
+  persistManagerSession,
+} from "@/lib/managerAuth";
 
 interface LoginPopupProps {
   onClose: () => void;
@@ -25,8 +29,6 @@ interface OperatorOption {
   id: string;
   name: string;
 }
-
-const MANAGER_EMAIL = "ishimweamanid@gmail.com";
 
 export function LoginPopup({ onClose }: LoginPopupProps) {
   const router = useRouter();
@@ -102,59 +104,42 @@ export function LoginPopup({ onClose }: LoginPopupProps) {
       return;
     }
 
-    if (managerEmail.trim().toLowerCase() !== MANAGER_EMAIL.toLowerCase()) {
-      setManagerError(
-        `Access restricted. Authorized email is ${MANAGER_EMAIL}`,
-      );
-      return;
-    }
-
     setLoading(true);
 
     try {
-      // Authenticate via Supabase Auth to ensure robust session management across devices
-      const { data: authData, error: authError } =
-        await supabase.auth.signInWithPassword({
-          email: managerEmail.trim(),
-          password: managerPassword,
-        });
+      const result = await authenticateManager({
+        email: managerEmail.trim(),
+        managerCode: managerCode.trim(),
+        password: managerPassword,
+        agencyName: managerAgency.trim(),
+      });
 
-      if (authError || !authData.user) {
-        // Fallback or explicit error if account doesn't exist yet in Supabase auth
-        if (managerPassword !== "54321" && managerPassword !== "urugendo2026") {
-          setManagerError(
-            "Incorrect master password or unauthorized credentials.",
-          );
-          setLoading(false);
-          return;
+      if (!result.ok) {
+        switch (result.reason) {
+          case "missing_fields":
+            setManagerError("All fields are required.");
+            break;
+          case "not_found":
+          case "code_mismatch":
+          case "agency_mismatch":
+            setManagerError("Invalid email, manager code, or agency.");
+            break;
+          case "inactive":
+            setManagerError("This manager account has been deactivated.");
+            break;
+          case "bad_password":
+            setManagerError("Incorrect password.");
+            break;
+          default:
+            setManagerError("Authentication failed. Please try again.");
         }
-      } else {
-        // Verify user profile role is manager if profile exists
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", authData.user.id)
-          .single();
-
-        if (profile && profile.role !== "manager" && profile.role !== "admin") {
-          // Allow override for primary manager email
-          if (managerEmail.toLowerCase() !== MANAGER_EMAIL.toLowerCase()) {
-            setManagerError("User account does not have manager privileges.");
-            setLoading(false);
-            return;
-          }
-        }
+        setLoading(false);
+        return;
       }
 
-      // Save non-sensitive credentials locally (excluding password)
-      if (typeof window !== "undefined") {
-        localStorage.setItem("urugendo_role", "manager");
-        localStorage.setItem("urugendo_manager_name", managerName.trim());
-        localStorage.setItem("urugendo_manager_email", managerEmail.trim());
-        localStorage.setItem("urugendo_agency", managerAgency.trim());
-        localStorage.setItem("urugendo_manager_code", managerCode.trim());
-      }
-
+      // Success — persist session and redirect
+      const mgr = result.manager!;
+      persistManagerSession(mgr);
       setUserRole("manager");
       setLoading(false);
       onClose();
@@ -294,7 +279,7 @@ export function LoginPopup({ onClose }: LoginPopupProps) {
                   type="email"
                   value={managerEmail}
                   onChange={(e) => setManagerEmail(e.target.value)}
-                  placeholder={MANAGER_EMAIL}
+                  placeholder="manager@agency.com"
                   className="w-full h-11 px-3 rounded-xl border border-border text-[13px] font-semibold focus:outline-none focus:border-primary"
                 />
               </div>
@@ -354,8 +339,8 @@ export function LoginPopup({ onClose }: LoginPopupProps) {
                     type="text"
                     value={managerCode}
                     onChange={(e) => setManagerCode(e.target.value)}
-                    placeholder="MGR-001"
-                    className="w-full h-11 px-3 rounded-xl border border-border text-[13px] font-mono font-bold focus:outline-none focus:border-primary uppercase"
+                    placeholder="••••••••"
+                    className="w-full h-11 px-3 rounded-xl border border-border text-[13px] font-mono font-bold focus:outline-none focus:border-primary "
                   />
                 </div>
               </div>

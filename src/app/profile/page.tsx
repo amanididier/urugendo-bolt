@@ -40,6 +40,7 @@ export default function ProfilePage() {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordMessage, setPasswordMessage] = useState("");
 
   useEffect(() => {
@@ -60,11 +61,33 @@ export default function ProfilePage() {
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    setPasswordMessage("Updating password...");
+    if (!currentPassword.trim() || !newPassword.trim()) {
+      setPasswordMessage("Please fill in current and new password.");
+      return;
+    }
+    if (newPassword.length < 6) {
+      setPasswordMessage("New password must be at least 6 characters.");
+      return;
+    }
+    if (confirmPassword !== newPassword) {
+      setPasswordMessage("New passwords do not match.");
+      return;
+    }
+    setPasswordMessage("Verifying current password...");
     try {
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword,
+      const { data: { user } } = await supabase.auth.getUser();
+      const email = user?.email;
+      if (!email) throw new Error("No signed-in user.");
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password: currentPassword,
       });
+      if (signInError) {
+        setPasswordMessage("Current password is incorrect.");
+        return;
+      }
+      setPasswordMessage("Updating password...");
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) throw error;
       setPasswordMessage("Password updated successfully!");
       setTimeout(() => {
@@ -72,7 +95,8 @@ export default function ProfilePage() {
         setPasswordMessage("");
         setNewPassword("");
         setCurrentPassword("");
-      }, 2000);
+        setConfirmPassword("");
+      }, 1800);
     } catch (err: any) {
       setPasswordMessage(err.message || "Failed to update password");
     }
@@ -90,10 +114,12 @@ export default function ProfilePage() {
     if (isLoggedIn) {
       await supabase.auth.signOut();
       if (typeof window !== "undefined") {
-        localStorage.removeItem("urugendo_role");
-        localStorage.removeItem("urugendo_is_logged_in");
-        localStorage.removeItem("urugendo_user_name");
-        localStorage.removeItem("urugendo_user_email");
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && (k.startsWith("urugendo_") || k.startsWith("sb-"))) keysToRemove.push(k);
+        }
+        keysToRemove.forEach((k) => localStorage.removeItem(k));
       }
       setIsLoggedIn(false);
       router.refresh();
@@ -283,6 +309,19 @@ export default function ProfilePage() {
               <form onSubmit={handleUpdatePassword} className="space-y-3">
                 <div>
                   <label className="text-[11px] font-bold text-slate-500 block mb-1">
+                    Current Password
+                  </label>
+                  <input
+                    type="password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    required
+                    placeholder="••••••••"
+                    className="w-full h-11 px-3.5 rounded-xl border border-slate-200 text-[13px] font-semibold text-slate-900 focus:outline-none focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 block mb-1">
                     New Password
                   </label>
                   <input
@@ -294,6 +333,21 @@ export default function ProfilePage() {
                     className="w-full h-11 px-3.5 rounded-xl border border-slate-200 text-[13px] font-semibold text-slate-900 focus:outline-none focus:border-primary"
                   />
                 </div>
+                {newPassword.length > 0 && (
+                  <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
+                    <label className="text-[11px] font-bold text-slate-500 block mb-1">
+                      Confirm New Password
+                    </label>
+                    <input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      required
+                      placeholder="Re-enter new password"
+                      className="w-full h-11 px-3.5 rounded-xl border border-slate-200 text-[13px] font-semibold text-slate-900 focus:outline-none focus:border-primary"
+                    />
+                  </motion.div>
+                )}
                 {passwordMessage && (
                   <p className="text-[12px] font-bold text-center text-primary py-1">
                     {passwordMessage}

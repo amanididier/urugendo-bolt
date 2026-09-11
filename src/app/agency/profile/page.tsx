@@ -185,9 +185,12 @@ export default function AgentProfilePage() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    localStorage.removeItem("urugendo_agent_name");
-    localStorage.removeItem("urugendo_agent_email");
-    localStorage.removeItem("urugendo_role");
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith("urugendo_") || k.startsWith("sb-"))) keysToRemove.push(k);
+    }
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
     router.push("/agency/agency-login");
   };
 

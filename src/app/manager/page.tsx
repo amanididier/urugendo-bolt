@@ -572,6 +572,13 @@ export default function AgencyManagerApp() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     clearManagerSession();
+    // Also sweep any leftover urugendo_ / sb- keys so next user on this device cannot reuse stale session
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith("urugendo_") || k.startsWith("sb-"))) keysToRemove.push(k);
+    }
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
     router.push("/agency/agency-login");
   };
 

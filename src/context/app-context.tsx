@@ -126,9 +126,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           localStorage.setItem("urugendo_user_phone", resolvedPhone);
 
         // Derive role from the authenticated user: which Supabase table
-        // identifies them? manager is a hard-coded email until Batch 5.
+        // identifies them? Manager role is determined by presence in
+        // agency_managers table (see managerAuth.ts).
         const userEmail = session.user.email || "";
-        if (userEmail === "ishimweamanid@gmail.com") {
+        const { data: managerRow } = await supabase
+          .from("agency_managers")
+          .select("id")
+          .eq("email", userEmail)
+          .maybeSingle();
+        if (managerRow) {
           setUserRoleState("manager");
         } else {
           const { data: agentRow } = await supabase

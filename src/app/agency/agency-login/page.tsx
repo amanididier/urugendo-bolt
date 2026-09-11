@@ -96,7 +96,7 @@ function LoginContent() {
   const [managerEmail, setManagerEmail] = useState("");
   const [managerCode, setManagerCode] = useState("");
   const [managerPassword, setManagerPassword] = useState("");
-  const [managerAgency, setManagerAgency] = useState("Virunga Express");
+  const [managerAgency, setManagerAgency] = useState("");
   const [managerError, setManagerError] = useState("");
 
   // Local storage auto-persistence check on mount
@@ -788,7 +788,7 @@ function LoginContent() {
               type="text"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
-              placeholder="e.g. Didier Ishimwe"
+              placeholder="Kanyarwanda safari"
               className="w-full h-12 pl-10 pr-4 rounded-xl border border-border bg-white text-[14px] focus:outline-none focus:border-primary font-medium"
             />
           </div>
@@ -997,7 +997,7 @@ function LoginContent() {
                     type="email"
                     value={managerEmail}
                     onChange={(e) => setManagerEmail(e.target.value)}
-                    placeholder="manager@virunga.com"
+                    placeholder="manager@agency.com"
                     className="w-full h-10 px-3 rounded-xl border border-border text-[13px] font-medium focus:outline-none focus:border-primary"
                   />
                 </div>
@@ -1010,7 +1010,7 @@ function LoginContent() {
                     type="text"
                     value={managerCode}
                     onChange={(e) => setManagerCode(e.target.value)}
-                    placeholder="MGR-001"
+                    placeholder="••••••••"
                     className="w-full h-10 px-3 rounded-xl border border-border text-[13px] font-mono font-bold focus:outline-none focus:border-primary"
                   />
                 </div>
