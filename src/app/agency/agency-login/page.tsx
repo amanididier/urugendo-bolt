@@ -122,6 +122,7 @@ function LoginContent() {
       }
       if (data) {
         setOperators(data);
+        // Single-agency fast path: auto-select when only one exists
         if (data.length === 1) {
           setSelectedOperator(data[0]);
           setOperatorQuery(data[0].name);
@@ -130,6 +131,25 @@ function LoginContent() {
     }
     loadOperators();
   }, []);
+  // Auto-bind real branches for the default agency (fixes phantom default where Branch picker stays empty
+  // until the user re-opens the agency dropdown). Works for multi-agency as well.
+  useEffect(() => {
+    if (selectedOperator || operators.length === 0) return;
+    const savedName = typeof window !== "undefined" ? localStorage.getItem("urugendo_agency") : null;
+    const def = (savedName && operators.find((o) => o.name === savedName)) || operators[0];
+    if (!def) return;
+    setSelectedOperator(def);
+    setOperatorQuery(def.name);
+    (async () => {
+      setBranchLoading(true);
+      try {
+        const { data: brs } = await supabase.from("branches").select("name").eq("agency_name", def.name).order("name");
+        setRealBranchNames(((brs as any[]) || []).map((r) => r.name));
+      } catch {}
+      setBranchLoading(false);
+    })();
+  }, [operators, selectedOperator]);
+
 
   // Realtime polling listener to check if the pending agent has been approved by manager
   useEffect(() => {
