@@ -36,6 +36,8 @@ import {
   fetchBranchRevenue,
   BranchRecord,
   PeriodStats,
+  agencyPrefix,
+  nextStationCode,
 } from "@/lib/branchService";
 import {
   getStoredManager,
@@ -234,6 +236,7 @@ export default function AgencyManagerApp() {
   const [newBranchLocationInput, setNewBranchLocationInput] = useState("");
   const [newBranchMomoInput, setNewBranchMomoInput] = useState("");
   const [newBranchPhoneInput, setNewBranchPhoneInput] = useState("");
+  const [newBranchStationCodeInput, setNewBranchStationCodeInput] = useState("");
   const [newBranchError, setNewBranchError] = useState("");
   const [isCreatingBranch, setIsCreatingBranch] = useState(false);
 
@@ -462,7 +465,8 @@ export default function AgencyManagerApp() {
   };
 
   // Verified DB insert: only add to local list after Supabase confirms, with
-  // exact agency_name so `select name from branches where agency_name = :agency` works.
+  // exact agency_name + station_code so `select * from branches where agency_name = :agency`
+  // and login verify against station_code works. Auto-fills FAS-xxx / VIR-xxx.
   const handleCreateBranch = async (e: React.FormEvent) => {
     e.preventDefault();
     setNewBranchError("");
@@ -490,12 +494,21 @@ export default function AgencyManagerApp() {
       return;
     }
 
+    const codeRaw = newBranchStationCodeInput.trim().toUpperCase();
+    const prefix = agencyPrefix(agencyForInsert);
+    const stationCode = codeRaw || nextStationCode(agencyForInsert, branches.map((b) => b.stationCode || ""));
+    if (!new RegExp(`^${prefix}-\\d{3}$`).test(stationCode)) {
+      setNewBranchError(`Station security code must be ${prefix}-XXX (e.g. ${prefix}-001).`);
+      return;
+    }
+
     setIsCreatingBranch(true);
     const payload: BranchRecord = {
       id: crypto.randomUUID(),
       name: newBranchNameInput.trim(),
       location: newBranchLocationInput.trim(),
       agencyName: agencyForInsert,
+      stationCode,
       momoCode: newBranchMomoInput.trim() || null,
       phone: newBranchPhoneInput.trim(),
       agentName: "Assigned Agent",
@@ -527,6 +540,7 @@ export default function AgencyManagerApp() {
     setNewBranchLocationInput("");
     setNewBranchMomoInput("");
     setNewBranchPhoneInput("");
+    setNewBranchStationCodeInput("");
     setNewBranchError("");
     showToast(`Branch ${payload.name} added successfully!`);
   };
@@ -1147,13 +1161,13 @@ export default function AgencyManagerApp() {
                   placeholder: "e.g. Muhanga Terminal",
                 },
                 {
-                  label: "Branch Location (City)",
+                  label: "Branch Location (City) — stored as location",
                   value: newBranchLocationInput,
                   setter: setNewBranchLocationInput,
-                  placeholder: "e.g. Muhanga",
+                  placeholder: "e.g. Kigali, Muhanga",
                 },
                 {
-                  label: "Branch MoMo Code (6-7 digits)",
+                  label: "Branch MoMo Code (6-7 digits) — payment",
                   value: newBranchMomoInput,
                   setter: (v: string) => setNewBranchMomoInput(v.replace(/\D/g, "")),
                   placeholder: "e.g. 5129401",
@@ -1182,6 +1196,36 @@ export default function AgencyManagerApp() {
                   />
                 </div>
               ))}
+
+              <div>
+                <label className="text-[11px] font-bold text-text-primary block mb-1">
+                  Station Security Code — {session ? agencyPrefix(session.agencyName) : "FAS/VIR"}-XXX (login code for this branch)
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newBranchStationCodeInput}
+                    onChange={(e) => setNewBranchStationCodeInput(e.target.value.toUpperCase())}
+                    placeholder={session ? `${agencyPrefix(session.agencyName)}-001` : "FAS-001"}
+                    className="flex-1 h-10 px-3 rounded-xl border border-border text-xs font-mono font-bold tracking-widest focus:outline-none focus:border-primary uppercase"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!session) return;
+                      setNewBranchStationCodeInput(
+                        nextStationCode(session.agencyName, branches.map((b) => b.stationCode || "")),
+                      );
+                    }}
+                    className="px-3 h-10 rounded-xl bg-slate-100 border border-border text-[11px] font-bold text-text-primary whitespace-nowrap"
+                  >
+                    Auto-fill {session ? agencyPrefix(session.agencyName) + "-XXX" : ""}
+                  </button>
+                </div>
+                <p className="text-[10px] text-text-muted mt-1">
+                  Leave blank to auto-assign. Virunga → VIR-xxx, Fasta → FAS-xxx.
+                </p>
+              </div>
 
               {newBranchError && (
                 <p className="text-[11px] font-bold text-red-600 text-center bg-red-50 p-2 rounded-lg">

@@ -85,6 +85,8 @@ function LoginContent() {
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
   const branchFieldRef = useRef<HTMLDivElement>(null);
   const [realBranchNames, setRealBranchNames] = useState<string[]>([]);
+  // DB-sourced branch → station_code map for this agency (validates security code)
+  const [branchCodeMap, setBranchCodeMap] = useState<Record<string, string>>({});
   const [branchLoading, setBranchLoading] = useState(false);
 
   const [lockoutRemainingSecs, setLockoutRemainingSecs] = useState<number>(0);
@@ -143,8 +145,12 @@ function LoginContent() {
     (async () => {
       setBranchLoading(true);
       try {
-        const { data: brs } = await supabase.from("branches").select("name").eq("agency_name", def.name).order("name");
-        setRealBranchNames(((brs as any[]) || []).map((r) => r.name));
+        const { data: brs } = await supabase.from("branches").select("name, station_code").eq("agency_name", def.name).order("name");
+        const rows = (brs as any[]) || [];
+        setRealBranchNames(rows.map((r) => r.name));
+        const m: Record<string, string> = {};
+        for (const r of rows) if (r.station_code) m[r.name] = r.station_code;
+        setBranchCodeMap(m);
       } catch {}
       setBranchLoading(false);
     })();
@@ -219,12 +225,16 @@ function LoginContent() {
     setOperatorDropdownOpen(false);
     setSelectedBranch("");
     setBranchCodeInput("");
-    // Fetch real branches for this agency from public.branches (not operators.branches mock)
+    // Fetch real branches for this agency from public.branches (includes station_code)
     (async () => {
       setBranchLoading(true);
       try {
-        const { data } = await supabase.from("branches").select("name").eq("agency_name", op.name).order("name");
-        setRealBranchNames(((data as any[]) || []).map((r) => r.name));
+        const { data } = await supabase.from("branches").select("name, station_code").eq("agency_name", op.name).order("name");
+        const rows = (data as any[]) || [];
+        setRealBranchNames(rows.map((r) => r.name));
+        const m: Record<string, string> = {};
+        for (const r of rows) if (r.station_code) m[r.name] = r.station_code;
+        setBranchCodeMap(m);
       } catch {}
       setBranchLoading(false);
     })();
@@ -241,11 +251,15 @@ function LoginContent() {
   // Real branches from public.branches — empty when managers haven't added any yet (no mocks)
   const availableBranches = realBranchNames;
 
+  // Verify against DB station_code for this branch+agency; fallback to
+  // index-derived code only when station_code is missing (pre-migration rows).
   const getExpectedBranchCode = (
     operatorName: string,
     branchName: string,
     branchesList: string[],
   ) => {
+    const fromDb = branchCodeMap[branchName];
+    if (fromDb) return fromDb;
     const prefix = operatorName.substring(0, 3).toUpperCase();
     const branchIndex = branchesList.findIndex(
       (b) => b.toLowerCase() === branchName.toLowerCase(),

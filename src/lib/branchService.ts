@@ -5,11 +5,38 @@ export interface PeriodStats {
   revenue: number;
 }
 
+export function agencyPrefix(agencyName: string): string {
+  const a = (agencyName || "").trim().toLowerCase();
+  if (a.includes("fasta")) return "FAS";
+  if (a.includes("virunga")) return "VIR";
+  if (a.includes("volcano")) return "VOL";
+  if (a.includes("ritco")) return "RIT";
+  if (a.includes("trinity")) return "TRI";
+  const clean = agencyName.trim().toUpperCase().replace(/[^A-Z]/g, "");
+  if (clean.length >= 3) return clean.slice(0, 3);
+  return (clean + "XXX").slice(0, 3);
+}
+
+export function nextStationCode(
+  agencyName: string,
+  existingCodes: string[],
+): string {
+  const prefix = agencyPrefix(agencyName);
+  let max = 0;
+  for (const c of existingCodes) {
+    const m = c?.toUpperCase().match(new RegExp(`^${prefix}-(\\d{3})$`));
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  const n = String(max + 1).padStart(3, "0");
+  return `${prefix}-${n}`;
+}
+
 export interface BranchRecord {
   id: string;
   name: string;
   location: string;
   agencyName?: string | null;
+  stationCode?: string | null;
   momoCode: string | null;
   phone: string;
   agentName: string;
@@ -35,6 +62,7 @@ export async function fetchAgencyBranches(agencyName?: string): Promise<BranchRe
       name: b.name,
       location: b.location,
       agencyName: b.agency_name ?? null,
+      stationCode: b.station_code ?? null,
       momoCode: b.momo_code ?? null,
       phone: b.phone,
       agentName: b.agent_name,
@@ -128,6 +156,7 @@ export async function createNewBranch(branch: BranchRecord): Promise<boolean> {
       stats: branch.stats,
     };
     if (branch.agencyName) payload.agency_name = branch.agencyName;
+    if (branch.stationCode) payload.station_code = branch.stationCode.toUpperCase().trim();
     const { error } = await supabase.from("branches").insert(payload);
 
     if (error) {
