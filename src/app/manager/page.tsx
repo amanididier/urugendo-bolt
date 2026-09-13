@@ -235,6 +235,7 @@ export default function AgencyManagerApp() {
   const [newBranchMomoInput, setNewBranchMomoInput] = useState("");
   const [newBranchPhoneInput, setNewBranchPhoneInput] = useState("");
   const [newBranchError, setNewBranchError] = useState("");
+  const [isCreatingBranch, setIsCreatingBranch] = useState(false);
 
   // ── UI state ────────────────────────────────────────────────────────
   const [approvingId, setApprovingId] = useState<string | null>(null);
@@ -460,34 +461,48 @@ export default function AgencyManagerApp() {
     showToast(`Branch details for ${targetBranch.name} updated!`);
   };
 
+  // Verified DB insert: only add to local list after Supabase confirms, with
+  // exact agency_name so `select name from branches where agency_name = :agency` works.
   const handleCreateBranch = async (e: React.FormEvent) => {
     e.preventDefault();
     setNewBranchError("");
 
     if (
-      !newBranchNameInput ||
-      !newBranchLocationInput ||
-      !newBranchMomoInput ||
-      !newBranchPhoneInput
+      !newBranchNameInput.trim() ||
+      !newBranchLocationInput.trim() ||
+      !newBranchMomoInput.trim() ||
+      !newBranchPhoneInput.trim()
     ) {
       setNewBranchError("Please fill in all required fields.");
       return;
     }
 
-    if (!/^\d{6,7}$/.test(newBranchMomoInput)) {
+    if (!/^\d{6,7}$/.test(newBranchMomoInput.trim())) {
       setNewBranchError("MoMo code must be 6 or 7 digits.");
       return;
     }
 
-    const newBranchObj: BranchRecord = {
+    const agencyForInsert = (session?.agencyName || "").trim();
+    if (!agencyForInsert) {
+      setNewBranchError(
+        "Agency is not set for this manager. Sign in again via Manager Portal.",
+      );
+      return;
+    }
+
+    setIsCreatingBranch(true);
+    const payload: BranchRecord = {
       id: crypto.randomUUID(),
-      name: newBranchNameInput,
-      location: newBranchLocationInput,
-      agencyName: session?.agencyName || undefined,
-      momoCode: newBranchMomoInput || null,
-      phone: newBranchPhoneInput,
+      name: newBranchNameInput.trim(),
+      location: newBranchLocationInput.trim(),
+      agencyName: agencyForInsert,
+      momoCode: newBranchMomoInput.trim() || null,
+      phone: newBranchPhoneInput.trim(),
       agentName: "Assigned Agent",
-      agentEmail: "agent@virunga.rw",
+      agentEmail: `${newBranchNameInput
+        .toLowerCase()
+        .replace(/\s+/g, "")
+        .trim()}@virunga.rw`,
       stats: {
         today: { passengers: 0, revenue: 0 },
         monthly: { passengers: 0, revenue: 0 },
@@ -495,19 +510,25 @@ export default function AgencyManagerApp() {
       },
     };
 
-    setBranches((prev) => [newBranchObj, ...prev]);
+    const ok = await createNewBranch(payload);
+    setIsCreatingBranch(false);
 
-    const ok = await createNewBranch(newBranchObj);
     if (!ok) {
-      showToast("Branch saved locally — DB sync failed. Will retry.");
+      setNewBranchError(
+        "Failed to save branch to database. Check connection / RLS and try again.",
+      );
+      return;
     }
 
+    // Only update local list after verified DB insert — prevents refresh wipe.
+    setBranches((prev) => [payload, ...prev]);
     setShowAddBranchModal(false);
     setNewBranchNameInput("");
     setNewBranchLocationInput("");
     setNewBranchMomoInput("");
     setNewBranchPhoneInput("");
-    showToast(`Branch ${newBranchObj.name} added successfully!`);
+    setNewBranchError("");
+    showToast(`Branch ${payload.name} added successfully!`);
   };
 
   const handleDeleteBranchConfirm = async () => {
@@ -1168,19 +1189,31 @@ export default function AgencyManagerApp() {
                 </p>
               )}
 
+              <p className="text-[11px] text-text-muted bg-slate-50 p-2 rounded-xl">
+                Saving to agency:{" "}
+                <span className="font-bold text-text-primary">
+                  {session?.agencyName || "— sign in again —"}
+                </span>
+              </p>
+
               <div className="flex gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowAddBranchModal(false)}
-                  className="flex-1 py-2.5 rounded-xl border border-border font-bold text-xs text-text-primary cursor-pointer"
+                  onClick={() => {
+                    if (isCreatingBranch) return;
+                    setShowAddBranchModal(false);
+                  }}
+                  disabled={isCreatingBranch}
+                  className="flex-1 py-2.5 rounded-xl border border-border font-bold text-xs text-text-primary cursor-pointer disabled:opacity-60"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 rounded-xl bg-primary text-white font-bold text-xs shadow-md cursor-pointer"
+                  disabled={isCreatingBranch}
+                  className="flex-1 py-2.5 rounded-xl bg-primary text-white font-bold text-xs shadow-md cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2"
                 >
-                  Save Branch
+                  {isCreatingBranch ? "Saving..." : "Save Branch"}
                 </button>
               </div>
             </form>
