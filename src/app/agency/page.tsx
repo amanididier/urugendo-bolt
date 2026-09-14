@@ -258,15 +258,14 @@ export default function AgencyDashboard() {
     if (savedEmptySeats) {
       try {
         setEmptySeats(JSON.parse(savedEmptySeats));
-      } catch (e) {
-        console.error("Failed to parse saved empty seats", e);
+      } catch {
+        // ignore
       }
     }
 
     async function loadDashboardData() {
       setLoading(true);
       try {
-        // Resolve branch_id first: used for every branch-scoped query below.
         const storedAgentEmail =
           localStorage.getItem("urugendo_agent_email") ||
           localStorage.getItem("urugendo_user_email");
@@ -277,46 +276,26 @@ export default function AgencyDashboard() {
             .select("branch_id")
             .eq("email", storedAgentEmail)
             .maybeSingle();
-          resolvedBranchId = agentRow?.branch_id ?? null;
+          resolvedBranchId = (agentRow as any)?.branch_id ?? null;
         }
 
         const todayStr = new Date().toISOString().split("T")[0];
-        const [todayTrips, branchRevenue] = await Promise.all([
+        const [todayTrips, branchRevenue, branchBookingsRaw] = await Promise.all([
           fetchTripsByDate(todayStr),
-          // Batch 2: real revenue from paid bookings for today.
-          resolvedBranchId
-            ? fetchBranchRevenue(resolvedBranchId, "today")
-            : Promise.resolve({ passengers: 0, revenue: 0 }),
+          resolvedBranchId ? fetchBranchRevenue(resolvedBranchId, "today") : Promise.resolve({ passengers: 0, revenue: 0 }),
+          resolvedBranchId ? fetchBookingsByBranch(resolvedBranchId) : Promise.resolve([] as any),
         ]);
 
-        if (isMounted) {
-          setAgentBranchId(resolvedBranchId);
-
-          const currentStation = cleanStationName(branch);
-
-          // Filter trips: show outgoing (origin = this station) and incoming
-          // (destination = this station) trips.
-          const branchTrips = (todayTrips || []).filter((t) => {
-            const fromStation = cleanStationName(t.from || "");
-            const toStation = cleanStationName(t.to || "");
-            return (
-              fromStation.includes(currentStation) ||
-              toStation.includes(currentStation)
-            );
-          });
-
-          // Batch 2: fetch bookings scoped to this branch (branch_id FK).
-          // Falls back to empty if branch_id is not yet resolved.
-          let branchBookings: ExtendedBooking[] = [];
-          if (resolvedBranchId) {
-            const allBookings = await fetchBookingsByBranch(resolvedBranchId);
-            branchBookings = (allBookings as ExtendedBooking[]) || [];
-          }
-
-          setTrips(branchTrips);
-          setBookings(branchBookings);
-          setTodayRevenueData(branchRevenue);
-        }
+        if (!isMounted) return;
+        setAgentBranchId(resolvedBranchId);
+        const currentStation = cleanStationName(branch);
+        const branchTrips = (todayTrips || []).filter((t: any) => {
+          if (t.origin_branch_id && resolvedBranchId) return t.origin_branch_id === resolvedBranchId || t.branch_id === resolvedBranchId;
+          return cleanStationName(t.from || "").includes(currentStation) || cleanStationName(t.to || "").includes(currentStation);
+        });
+        setTrips(branchTrips);
+        setBookings((branchBookingsRaw as ExtendedBooking[]) || []);
+        setTodayRevenueData(branchRevenue as any);
       } catch (error) {
         console.error("Failed to fetch agency dashboard data:", error);
       } finally {
@@ -330,6 +309,68 @@ export default function AgencyDashboard() {
       isMounted = false;
     };
   }, []);
+
+  // Live realtime: bookings + trips for this branch (no refresh needed)
+  useEffect(() => {
+    if (!agentBranchId) return;
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { supabase: sb } = require("@/lib/supabase") as { supabase: typeof supabase };
+    const chBookings = sb
+      .channel(`agency-bookings-${agentBranchId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "bookings", filter: `branch_id=eq.${agentBranchId}` }, (payload: any) => {
+        const row = payload.new;
+        if (!row) return;
+        // Map row -> ExtendedBooking shape (light), merge into list
+        const mapped: any = {
+          id: row.id, status: row.status, payment_status: row.payment_status ?? row.paymentStatus,
+          passengerName: row.passenger_name, passengerPhone: row.passenger_phone,
+          momoName: row.momo_name, momoNumber: row.momo_number,
+          shortCode: row.booking_code || row.short_code, seat: row.seat_label || row.seat_id,
+          totalAmount: row.fare_amount ?? row.total_amount, createdAt: row.created_at,
+          trip: row.trip_id ? { id: row.trip_id } : undefined, branchId: row.branch_id,
+        };
+        setBookings((prev) => {
+          if (payload.eventType === "INSERT") return [mapped, ...prev];
+          if (payload.eventType === "UPDATE") return prev.map((b) => (b.id === row.id ? { ...b, ...mapped } : b));
+          if (payload.eventType === "DELETE") return prev.filter((b) => b.id !== (payload.old?.id ?? row.id));
+          return prev;
+        });
+      })
+      .subscribe();
+    const chTrips = sb
+      .channel(`agency-trips-${agentBranchId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "trips" }, (payload: any) => {
+        const row = payload.new;
+        const oldRow = payload.old;
+        // Only care about trips for this agent's branch
+        const matches = row ? (row.origin_branch_id === agentBranchId || row.branch_id === agentBranchId) : false;
+        const oldMatches = oldRow ? (oldRow.origin_branch_id === agentBranchId || oldRow.branch_id === agentBranchId) : false;
+        if (payload.eventType === "INSERT" && matches) {
+          // Trigger a light reload of trips (keeps operator join correct) — cheap, no bookings reload
+          fetchTripsByDate(new Date().toISOString().split("T")[0]).then((all) => {
+            setTrips((prev) => {
+              const filtered = all.filter((t: any) => t.origin_branch_id === agentBranchId || t.branch_id === agentBranchId || cleanStationName(t.from || "").includes(cleanStationName(agentBranch)));
+              // merge by id to avoid duplicates
+              const byId = new Map(prev.map((t) => [t.id, t]));
+              for (const t of filtered) byId.set(t.id, t);
+              return Array.from(byId.values());
+            });
+          });
+          return;
+        }
+        if (payload.eventType === "UPDATE" && (matches || oldMatches)) {
+          setTrips((prev) => prev.map((t) => (t.id === row.id ? { ...t, status: row.status, departureTime: row.departure_time ?? t.departureTime, arrivalTime: row.arrival_time ?? t.arrivalTime } : t)));
+        }
+        if (payload.eventType === "DELETE" && oldMatches) {
+          setTrips((prev) => prev.filter((t) => t.id !== oldRow.id));
+        }
+      })
+      .subscribe();
+    return () => {
+      sb.removeChannel(chBookings);
+      sb.removeChannel(chTrips);
+    };
+  }, [agentBranchId, agentBranch]);
 
   const currentStationKey = cleanStationName(agentBranch);
 

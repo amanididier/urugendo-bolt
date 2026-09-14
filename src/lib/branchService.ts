@@ -49,7 +49,7 @@ export interface BranchRecord {
  */
 export async function fetchAgencyBranches(agencyName?: string): Promise<BranchRecord[]> {
   try {
-    let query = supabase.from("branches").select("*");
+    let query = supabase.from("branches").select("id, name, location, agency_name, station_code, momo_code, phone, agent_name, agent_email, stats");
     if (agencyName) query = query.eq("agency_name", agencyName);
     const { data, error } = await query;
     if (error || !data) {

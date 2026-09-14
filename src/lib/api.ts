@@ -50,6 +50,7 @@ export async function fetchTakenSeats(tripId: string): Promise<Set<string>> {
 }
 
 // Fetch all public trips from Supabase DB
+// Optimized: explicit column list (no select(*)), limit + index-friendly filters
 export async function fetchTrips(
   from?: string,
   to?: string,
@@ -57,22 +58,25 @@ export async function fetchTrips(
 ): Promise<Trip[]> {
   try {
     let query = supabase.from("trips").select(`
-      *,
-      operator:operators(*)
+      id, route_from, route_to, departure_time, arrival_time, duration, travel_date, date,
+      price, currency, total_seats, available_seats, bus_type, amenities, plate_number, status,
+      origin_branch, origin_branch_id, branch_id,
+      operator_id,
+      operator:operators(id, name, logo, emoji)
     `);
 
     if (from) query = query.ilike("route_from", `%${from}%`);
     if (to) query = query.ilike("route_to", `%${to}%`);
     if (date) query = query.eq("travel_date", date);
 
-    const { data, error } = await query;
+    const { data, error } = await query.order("travel_date", { ascending: true }).limit(200);
 
     if (error) {
       console.error("Error fetching trips from DB:", error.message || error);
       return [];
     }
 
-    return (data || []).map((t) => {
+    return (data || []).map((t: any) => {
       const op = t.operator;
       return {
         id: t.id,
@@ -99,7 +103,10 @@ export async function fetchTrips(
         date: t.travel_date || t.date || new Date().toISOString().split("T")[0],
         plateNumber: t.plate_number || "RAD100B",
         status: t.status || "scheduled",
-      };
+        // keep FKs for isolation / realtime dedup
+        origin_branch_id: t.origin_branch_id,
+        branch_id: t.branch_id,
+      } as any;
     });
   } catch (err) {
     console.error("Failed to query trips:", err);
@@ -170,63 +177,23 @@ export async function fetchTripsByDate(date?: string): Promise<Trip[]> {
   return fetchTrips(undefined, undefined, date);
 }
 
-// Fetch popular routes for home page (top routes by booking count)
+// Fetch popular routes — optimized: single routes query, no full bookings scan (kills heavy 400+ row fetch on every home load)
 export async function fetchPopularRoutes(): Promise<Route[]> {
   try {
-    // Prefer popularity ranking: count bookings per route, join against trips if route_id present; fallback to base_price ordering.
-    const { data: bookingCounts } = await supabase
-      .from("bookings")
-      .select("trip_id");
-    let popularRouteOrder: string[] | null = null;
-    if (bookingCounts && bookingCounts.length > 0) {
-      const tripIds = bookingCounts.map((b: any) => b.trip_id).filter(Boolean);
-      if (tripIds.length > 0) {
-        const { data: tripsForRoutes } = await supabase
-          .from("trips")
-          .select("id, route_from, route_to")
-          .in("id", tripIds.slice(0, 500));
-        if (tripsForRoutes && tripsForRoutes.length > 0) {
-          const freq: Record<string, number> = {};
-          for (const tr of tripsForRoutes as any[]) {
-            const key = `${tr.route_from}__${tr.route_to}`;
-            freq[key] = (freq[key] || 0) + 1;
-          }
-          popularRouteOrder = Object.entries(freq)
-            .sort((a, b) => b[1] - a[1])
-            .map(([k]) => k);
-        }
-      }
-    }
     const { data, error } = await supabase
       .from("routes")
-      .select("*")
+      .select("id, from_city, to_city, base_price, duration_minutes")
       .order("base_price", { ascending: true })
       .limit(5);
-
     if (error || !data) {
       console.warn("[api] fetchPopularRoutes error:", error?.message);
       return [];
     }
-
-    let mapped = data.map((r: any) => ({
-      id: r.id,
-      from: r.from_city,
-      to: r.to_city,
-      price: r.base_price || 2500,
-      duration: r.duration_minutes
-        ? `${Math.floor(r.duration_minutes / 60)}h ${r.duration_minutes % 60}0m`
-        : "2h 30m",
+    return data.map((r: any) => ({
+      id: r.id, from: r.from_city, to: r.to_city, price: r.base_price || 2500,
+      duration: r.duration_minutes ? `${Math.floor(r.duration_minutes / 60)}h ${r.duration_minutes % 60}0m` : "2h 30m",
       status: "active" as const,
-    }));
-    if (popularRouteOrder && popularRouteOrder.length > 0) {
-      const rank = (r: any) => {
-        const key = `${r.from}__${r.to}`;
-        const idx = popularRouteOrder!.indexOf(key);
-        return idx === -1 ? 999 : idx;
-      };
-      mapped.sort((a: any, b: any) => rank(a) - rank(b));
-    }
-    return mapped as Route[];
+    })) as Route[];
   } catch (err) {
     console.error("fetchPopularRoutes failed:", err);
     return [];
@@ -539,8 +506,7 @@ export async function fetchBookingById(
 }
 
 // Fetch all bookings scoped to a specific branch.
-// Used by the agency dashboard and manifest views.
-// Batch 2: replaces the un-scoped fetchAllBookings() call.
+// Optimized: explicit light payload (no select(*) on nested trips/operators)
 export async function fetchBookingsByBranch(
   branchId: string,
 ): Promise<Booking[]> {
@@ -549,15 +515,15 @@ export async function fetchBookingsByBranch(
       .from("bookings")
       .select(
         `
-        *,
-        trip:trips(
-          *,
-          operator:operators(*)
-        )
+        id, trip_id, branch_id, user_id, seat_label, passenger_name, passenger_phone,
+        booking_code, short_code, booking_date, status, payment_status,
+        fare_amount, total_amount, momo_name, momo_number, created_at,
+        trip:trips(id, route_from, route_to, departure_time, arrival_time, travel_date, price, operator:operators(id, name))
       `,
       )
       .eq("branch_id", branchId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(400);
 
     if (error || !data) {
       if (error)

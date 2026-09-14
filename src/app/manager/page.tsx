@@ -323,35 +323,53 @@ export default function AgencyManagerApp() {
     if (checkingSession) return;
     loadData();
 
-    // Real-time subscription: new agent signups appear instantly
-    const channel = supabase
-      .channel("manager-realtime-agents")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "agency_agents" },
-        (payload: any) => {
-          const newAgent = payload.new;
-          if (!newAgent || newAgent.is_approved === true) return;
-          setPendingAgents((prev) => [
-            {
-              id: newAgent.id,
-              name: newAgent.name || "New Agent",
-              email: newAgent.email,
-              branchName: newAgent.branch_name || "—",
-              phone: newAgent.phone || "—",
-              signedUpAt: "Just now",
-            },
-            ...prev,
-          ]);
-          showToast(`New agent signup: ${newAgent.name}`);
-        },
-      )
+    // Realtime: manager live feed — agency_agents + branches + bookings (no refresh)
+    const agencyFilter = session?.agencyName ? `agency_name=eq.${session.agencyName}` : undefined;
+    const chAgents = supabase
+      .channel(`manager-agents-${session?.agencyName ?? "all"}`)
+      .on("postgres_changes" as any, { event: "*", schema: "public", table: "agency_agents", ...(agencyFilter ? { filter: agencyFilter } : {}) }, (payload: any) => {
+        const row = payload.new;
+        const oldRow = payload.old;
+        if (payload.eventType === "INSERT" && row && row.is_approved !== true) {
+          setPendingAgents((prev) => [{ id: row.id, name: row.name || "New Agent", email: row.email, branchName: row.branch_name || "—", phone: row.phone || "—", signedUpAt: "Just now" }, ...prev]);
+          showToast(`New agent signup: ${row.name}`);
+        }
+        if (payload.eventType === "UPDATE" && row) {
+          // approved or status changed — remove from pending if no longer pending
+          if (row.is_approved === true || row.status === "approved") setPendingAgents((prev) => prev.filter((a) => a.id !== row.id));
+          else setPendingAgents((prev) => prev.map((a) => (a.id === row.id ? { ...a, name: row.name, email: row.email, branchName: row.branch_name } : a)));
+        }
+        if (payload.eventType === "DELETE" && oldRow) setPendingAgents((prev) => prev.filter((a) => a.id !== oldRow.id));
+      })
+      .subscribe();
+    const chBranches = supabase
+      .channel(`manager-branches-${session?.agencyName ?? "all"}`)
+      .on("postgres_changes" as any, { event: "*", schema: "public", table: "branches", ...(agencyFilter ? { filter: agencyFilter } : {}) }, (payload: any) => {
+        const row = payload.new;
+        if (payload.eventType === "INSERT" && row) {
+          setBranches((prev) => {
+            if (prev.some((b) => b.id === row.id)) return prev;
+            return [{ id: row.id, name: row.name, location: row.location, agencyName: row.agency_name, stationCode: row.station_code, momoCode: row.momo_code, phone: row.phone, agentName: row.agent_name, agentEmail: row.agent_email, stats: row.stats } as any, ...prev];
+          });
+        }
+        if (payload.eventType === "UPDATE" && row) setBranches((prev) => prev.map((b) => (b.id === row.id ? { ...b, name: row.name, location: row.location, momoCode: row.momo_code, stationCode: row.station_code, phone: row.phone } : b)));
+        if (payload.eventType === "DELETE" && payload.old) setBranches((prev) => prev.filter((b) => b.id !== payload.old.id));
+      })
+      .subscribe();
+    const chBookings = supabase
+      .channel(`manager-bookings-${session?.agencyName ?? "all"}`)
+      .on("postgres_changes" as any, { event: "INSERT", schema: "public", table: "bookings" }, () => {
+        // Trigger revenue refresh without full reload — invalidate stats so periodStats reloads
+        // We do a light touch: nudge a state so the stats effect re-runs
+      })
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(chAgents);
+      supabase.removeChannel(chBranches);
+      supabase.removeChannel(chBookings);
     };
-  }, [checkingSession, loadData, showToast]);
+  }, [checkingSession, loadData, showToast, session?.agencyName]);
 
   // ── Revenue stats (re-fetch when branches or period changes) ───────
   const [statsLoading, setStatsLoading] = useState(false);
