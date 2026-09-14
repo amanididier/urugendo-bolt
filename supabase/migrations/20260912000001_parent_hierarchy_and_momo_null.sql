@@ -49,16 +49,14 @@ UPDATE public.branches
  WHERE momo_code IS NOT NULL
    AND momo_code !~ '^[0-9]{6,7}$';
 
--- 3) agency_agents: ensure agency_name exists and add complementary agency_id
---    (FK to operators) for referential integrity. agency_name text stays as the
---    canonical field matching agency_managers.agency_name; agency_id is a
---    convenient FK duplicate for joins.
+-- 3) agency_agents: ensure agency_name exists (canonical field matching
+--    agency_managers.agency_name). Note: no agency_id — live Supabase schema
+--    has no such column (would throw PGRST204 on insert). agency_name text
+--    is the single agency link.
 ALTER TABLE public.agency_agents
-  ADD COLUMN IF NOT EXISTS agency_name text,
-  ADD COLUMN IF NOT EXISTS agency_id uuid REFERENCES public.operators(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS agency_name text;
 
 CREATE INDEX IF NOT EXISTS idx_agency_agents_agency_name ON public.agency_agents (agency_name);
-CREATE INDEX IF NOT EXISTS idx_agency_agents_agency_id ON public.agency_agents (agency_id);
 
 -- 4) Helpful composite index for branch isolation queries
 CREATE INDEX IF NOT EXISTS idx_branches_agency_branch_name

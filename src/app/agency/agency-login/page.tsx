@@ -389,14 +389,13 @@ function LoginContent() {
         try {
           await supabase.from("agency_agents").insert({
             id: authData.user.id,
-            user_id: authData.user.id,
             name: fullName,
             email,
             branch_name: selectedBranch,
             agency_name: selectedOperator.name,
-            agency_id: selectedOperator.id,
             phone: "+250 780 000 000",
             is_approved: false,
+            status: "pending",
           });
         } catch (insertErr) {
           console.error("[login] agency_agents insert error:", insertErr);
@@ -453,7 +452,7 @@ function LoginContent() {
       const { data: agentRow } = await supabase
         .from("agency_agents")
         .select("is_approved, status")
-        .eq("user_id", authData.user.id)
+        .eq("id", authData.user.id)
         .maybeSingle();
 
       const isApproved =
