@@ -16,26 +16,7 @@ import { useRouter } from "next/navigation";
 import { useApp } from "@/context/app-context";
 import { t } from "@/lib/translations";
 
-const initialSampleUserNotifications = [
-  {
-    id: "security-1",
-    title: "Secure Your Account",
-    message:
-      "Protect your bookings and ticket data by finishing your account verification. Tap to verify now.",
-    type: "security" as const,
-    read: false,
-    createdAt: "2026-08-24T08:00:00",
-  },
-  {
-    id: "1",
-    title: "Booking Confirmed!",
-    message:
-      "Your bus from Musanze to Kigali on 08:30 AM is confirmed. Code: XK7P2Q",
-    type: "booking" as const,
-    read: false,
-    createdAt: "2026-04-13T14:30:00",
-  },
-];
+const initialSampleUserNotifications: { id: string; title: string; message: string; type: "security" | "booking"; read: boolean; createdAt: string }[] = [];
 
 export default function NotificationsPage() {
   const router = useRouter();

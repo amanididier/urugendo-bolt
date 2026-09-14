@@ -60,22 +60,6 @@ export default function RootLayout({
                   navigator.serviceWorker.register('/sw.js').catch(() => {});
                 });
               }
-              window.addEventListener('urugendo-trip-delayed', (e) => {
-                try {
-                  const dest = e.detail?.destination || 'Rubavu';
-                  const existing = localStorage.getItem('urugendo_user_notifications');
-                  const parsed = existing ? JSON.parse(existing) : [];
-                  const newNotif = {
-                    id: 'notif-' + Date.now(),
-                    title: 'Trip Alert',
-                    message: '⚠️ Trip Alert: Your trip to ' + dest + ' has been delayed for 15 minutes due to heavy rainfall on the road. We appreciate your patience!',
-                    type: 'alert',
-                    read: false,
-                    createdAt: new Date().toISOString()
-                  };
-                  localStorage.setItem('urugendo_user_notifications', JSON.stringify([newNotif, ...parsed]));
-                } catch(err) {}
-              });
             `,
           }}
         />

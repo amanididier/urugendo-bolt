@@ -14,34 +14,21 @@ export interface AppNotification {
 
 const STORAGE_KEY = "urugendo_user_notifications";
 
-// Default initial sample notification if storage is empty
-const DEFAULT_NOTIFICATIONS: AppNotification[] = [
-  {
-    id: "notif-1",
-    title: "Welcome to Urugendo! 🎉",
-    message:
-      "Explore our live bus schedules and book your trips seamlessly across Rwanda.",
-    timestamp: new Date().toISOString(),
-    read: false,
-    type: "promo",
-  },
-];
+const DEFAULT_NOTIFICATIONS: AppNotification[] = [];
 
 export function getStoredNotifications(): AppNotification[] {
-  if (typeof window === "undefined") return DEFAULT_NOTIFICATIONS;
+  if (typeof window === "undefined") return [];
   try {
     const data = localStorage.getItem(STORAGE_KEY);
-    if (!data) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_NOTIFICATIONS));
-      return DEFAULT_NOTIFICATIONS;
-    }
+    if (!data) return [];
     const parsed = JSON.parse(data);
+    if (!Array.isArray(parsed)) return [];
     return parsed.map((n: any) => ({
       ...n,
       timestamp: n.timestamp || n.createdAt || new Date().toISOString(),
     }));
-  } catch (e) {
-    return DEFAULT_NOTIFICATIONS;
+  } catch {
+    return [];
   }
 }
 

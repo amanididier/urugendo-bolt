@@ -140,7 +140,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const { data: agentRow } = await supabase
             .from("agency_agents")
             .select("id")
-            .eq("user_id", session.user.id)
+            .eq("id", session.user.id)
             .maybeSingle();
           if (agentRow) {
             setUserRoleState("agent");

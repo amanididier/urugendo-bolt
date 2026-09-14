@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -152,7 +152,43 @@ export default function AgencyDashboard() {
   const [agentStatus, setAgentStatus] = useState<string>("approved");
   const [showApprovalModal, setShowApprovalModal] = useState(false);
 
-  const unreadCount = 3;
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [agencyLabel, setAgencyLabel] = useState<string>("");
+
+  useEffect(() => {
+    let mounted = true;
+    let ch: any = null;
+    supabase.auth.getUser().then(async ({ data }) => {
+      const uid = data?.user?.id;
+      if (!uid) { if (mounted) setUnreadCount(0); return; }
+      try {
+        const { count } = await supabase.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", uid).eq("read", false);
+        if (mounted && typeof count === "number") setUnreadCount(count);
+        // live badge — no refresh needed
+        ch = supabase.channel(`agent-notif-bell-${uid}`)
+          .on("postgres_changes" as any, { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${uid}` }, async () => {
+            const { count: c } = await supabase.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", uid).eq("read", false);
+            if (mounted && typeof c === "number") setUnreadCount(c);
+          })
+          .subscribe();
+      } catch {}
+    });
+    return () => { mounted = false; if (ch) supabase.removeChannel(ch); };
+  }, []);
+
+  // Dynamic agency header — resolve from agent's actual agency/branch
+  useEffect(() => {
+    const email = localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email");
+    if (!email) return;
+    supabase.from("agency_agents").select("agency_name, branch_name, branch_id").eq("email", email).maybeSingle().then(async ({ data }) => {
+      if (data?.agency_name) { setAgencyLabel(data.agency_name); return; }
+      // fallback: branches table if agency_name not set
+      if ((data as any)?.branch_id) {
+        const { data: br } = await supabase.from("branches").select("agency_name").eq("id", (data as any).branch_id).maybeSingle();
+        if ((br as any)?.agency_name) setAgencyLabel((br as any).agency_name);
+      }
+    });
+  }, []);
 
   // Added Supabase Real-Time Agent Approval Listener & Session Guard
   useEffect(() => {
@@ -377,6 +413,46 @@ export default function AgencyDashboard() {
   const verifiedBookings = bookings.filter((b) => b.status === "confirmed" || (b as any).payment_status === "verified" || b.status === "boarded");
   const isTripDeparted = (trip: Trip) => { try { const d = (trip as any).date || new Date().toISOString().split("T")[0]; const tm = trip.departureTime || "08:00"; const dt = new Date(`${d}T${tm}`); return !isNaN(dt.getTime()) && Date.now() >= dt.getTime(); } catch { return false; } };
   const displayTripStatus = (trip: Trip) => { if (trip.status === "delayed") return "delayed"; if (trip.status === "cancelled") return "cancelled"; if (trip.status === "departed" || trip.status === "arrived") return trip.status; return isTripDeparted(trip) ? "departed" : "pending"; };
+
+  // Threshold-based batching: notify agent at 5 pending, or at 5min if 1-4 still pending (no spam per-tx)
+  const batchNotifRef = React.useRef<{ lastCount: number; timer: ReturnType<typeof setTimeout> | null; lastBatchAt: number }>({ lastCount: 0, timer: null, lastBatchAt: 0 });
+  useEffect(() => {
+    const pending = bookings.filter((b) => b.status === "pending" || b.status === "payment_submitted" || (b as any).payment_status === "submitted").length;
+    const ref = batchNotifRef.current;
+    if (pending >= 5 && ref.lastCount < 5) {
+      // hit threshold 5 — immediate batch alert
+      ref.lastCount = pending;
+      ref.lastBatchAt = Date.now();
+      if (ref.timer) { clearTimeout(ref.timer); ref.timer = null; }
+      supabase.auth.getUser().then(async ({ data }) => {
+        const uid = data?.user?.id;
+        if (!uid) return;
+        const { supabase: sb } = await import("@/lib/supabase");
+        // also bump bell via notifications row so badge reflects
+        await sb.from("notifications").insert({ user_id: uid, title: "MoMo queue — 5 pending", message: `You have ${pending} unconfirmed MoMo payments awaiting verification.`, type: "reminder" } as any);
+      });
+      return;
+    }
+    if (pending > 0 && pending < 5) {
+      if (ref.timer) clearTimeout(ref.timer);
+      ref.timer = setTimeout(() => {
+        if (Date.now() - ref.lastBatchAt < 4 * 60 * 1000) return;
+        ref.lastBatchAt = Date.now();
+        supabase.auth.getUser().then(async ({ data }) => {
+          const uid = data?.user?.id;
+          if (!uid) return;
+          const { supabase: sb } = await import("@/lib/supabase");
+          await sb.from("notifications").insert({ user_id: uid, title: "Pending MoMo reminder", message: `You have ${pending} pending payment(s) waiting ≥5 min — please verify.`, type: "reminder" } as any);
+        });
+      }, 5 * 60 * 1000);
+      ref.lastCount = pending;
+      return () => { if (ref.timer) { clearTimeout(ref.timer); ref.timer = null; } };
+    }
+    if (pending === 0) {
+      if (ref.timer) { clearTimeout(ref.timer); ref.timer = null; }
+      ref.lastCount = 0;
+    }
+  }, [bookings]);
   const stationIncoming: ManifestTrip[] = trips.filter((t) => cleanStationName(t.to || "").includes(currentStationKey)).map((t, idx) => ({
       id: `inc-${t.id || idx}`, busPlate: t.plateNumber || "RAC 112D", driverName: t.driverName || "Station Driver", from: t.from, to: getBranchName(agentBranch), time: t.arrivalTime || t.departureTime, capacity: t.totalSeats || 29,
       urugendoPassengers: verifiedBookings.filter((b) => (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id && b.status !== "cancelled" && b.status !== "rejected").length, status: t.status || "In Transit",
@@ -709,17 +785,7 @@ export default function AgencyDashboard() {
           type: "general",
         });
       }
-      // Local toast (best-effort) — the DB row is the source of truth.
-      addUserNotification(
-        "Trip Alert Sent",
-        `Delay alert sent to ${sent} passenger${sent === 1 ? "" : "s"}.`,
-      );
-      // Also dispatch a custom event for global background listeners
-      window.dispatchEvent(
-        new CustomEvent("weka-trip-delayed", {
-          detail: { tripId, destination },
-        }),
-      );
+      // Local toast is NOT used — DB notification is real and shown on agency-notifications page
     }
   };
 
@@ -801,7 +867,7 @@ export default function AgencyDashboard() {
                 Agency Dashboard
               </h1>
               <p className="text-[12px] text-white/80 font-medium">
-                Weka Express • {agentBranch}
+                {(agencyLabel || "Weka Express")} • {agentBranch}
               </p>
             </div>
           </div>
