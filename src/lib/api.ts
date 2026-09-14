@@ -62,7 +62,7 @@ export async function fetchTrips(
       price, currency, total_seats, available_seats, bus_type, amenities, plate_number, status,
       origin_branch, origin_branch_id, branch_id,
       operator_id,
-      operator:operators(id, name, logo, emoji)
+      operator:operators(id, name, emoji)
     `);
 
     if (from) query = query.ilike("route_from", `%${from}%`);
@@ -352,12 +352,16 @@ export async function createBooking(bookingData: {
     // Look up branch_id from agency_agents → agency_agents.branch_id → branches.id
     let resolvedBranchId: string | null = null;
     try {
-      const { data: agentRow } = await supabase
-        .from("agency_agents")
-        .select("branch_id")
-        .eq("id", authData.user.id)
-        .maybeSingle();
+      const authEmail = (authData.user.email || "").trim().toLowerCase();
+      const authPhone = (authData.user as any)?.phone || (authData.user.user_metadata as any)?.phone || null;
+      let agentRow: any = null;
+      const { fetchAgentByAuth } = await import("@/lib/agencyAgentService");
+      agentRow = await fetchAgentByAuth({ email: authEmail, phone: authPhone });
       if ((agentRow as any)?.branch_id) resolvedBranchId = (agentRow as any).branch_id;
+      if (!resolvedBranchId && authEmail) {
+        const { data } = await supabase.from("agency_agents").select("branch_id").eq("email", authEmail).maybeSingle();
+        if ((data as any)?.branch_id) resolvedBranchId = (data as any).branch_id;
+      }
     } catch {}
     // Fallback: origin station from trip (most common: trips created at origin branch)
     if (!resolvedBranchId) {
@@ -507,21 +511,28 @@ export async function fetchBookingById(
 
 // Fetch all bookings scoped to a specific branch.
 // Optimized: explicit light payload (no select(*) on nested trips/operators)
+// Falls back to agency_branch text match when branch_id is null on legacy rows.
 export async function fetchBookingsByBranch(
   branchId: string,
 ): Promise<Booking[]> {
   try {
+    let branchName: string | null = null;
+    try {
+      const { data: br } = await supabase.from("branches").select("name").eq("id", branchId).maybeSingle();
+      if ((br as any)?.name) branchName = (br as any).name;
+    } catch {}
+
     const { data, error } = await supabase
       .from("bookings")
       .select(
         `
-        id, trip_id, branch_id, user_id, seat_label, passenger_name, passenger_phone,
+        id, trip_id, branch_id, agency_branch, user_id, seat_label, passenger_name, passenger_phone,
         booking_code, short_code, booking_date, status, payment_status,
         fare_amount, total_amount, momo_name, momo_number, created_at,
         trip:trips(id, route_from, route_to, departure_time, arrival_time, travel_date, price, operator:operators(id, name))
       `,
       )
-      .eq("branch_id", branchId)
+      .or(branchName ? `branch_id.eq.${branchId},agency_branch.ilike.${branchName}` : `branch_id.eq.${branchId}`)
       .order("created_at", { ascending: false })
       .limit(400);
 

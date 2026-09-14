@@ -86,6 +86,8 @@ export interface Trip {
   routeFrom?: string;
   terminalFrom?: string;
   terminalTo?: string;
+  origin_branch_id?: string | null;
+  branch_id?: string | null;
 }
 
 // ==========================================

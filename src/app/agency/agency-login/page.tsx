@@ -386,19 +386,48 @@ function LoginContent() {
           status: "pending",
         });
 
+        // Insert agent — never force `id = auth.users.id` (agency_agents.id is
+        // its own PK and the table has no user_id; forcing the auth id can 400).
+        // Resolve branch_id best-effort so row is branch-isolated even on first sign-up.
+        // Include agency_name/status but fall back if those columns are missing (pre-migration DB).
         try {
-          await supabase.from("agency_agents").insert({
-            id: authData.user.id,
-            name: fullName,
-            email,
+          const normalizedEmail = email.trim().toLowerCase();
+          let branchId: string | null = null;
+          try {
+            const { data: branchRow } = await supabase.from("branches").select("id").ilike("name", selectedBranch).limit(1).maybeSingle();
+            if ((branchRow as any)?.id) branchId = (branchRow as any).id;
+          } catch {}
+          const basePayload: Record<string, unknown> = {
+            name: fullName.trim(),
+            email: normalizedEmail,
             branch_name: selectedBranch,
-            agency_name: selectedOperator.name,
             phone: "+250 780 000 000",
             is_approved: false,
             status: "pending",
-          });
-        } catch (insertErr) {
-          console.error("[login] agency_agents insert error:", insertErr);
+            agency_name: selectedOperator.name?.trim() || null,
+          };
+          if (branchId) basePayload.branch_id = branchId;
+
+          let { error: insertErr } = await supabase.from("agency_agents").insert(basePayload as any);
+          if (insertErr) {
+            const msg = (insertErr.message || "").toLowerCase();
+            const missing = msg.includes("column") && (msg.includes("does not exist") || msg.includes("schema cache"));
+            if (missing) {
+              const fallback: Record<string, unknown> = {
+                name: fullName.trim(),
+                email: normalizedEmail,
+                branch_name: selectedBranch,
+                phone: "+250 780 000 000",
+                is_approved: false,
+              };
+              const r2 = await supabase.from("agency_agents").insert(fallback as any);
+              if (r2.error) console.warn("[login] agency_agents fallback insert error:", r2.error.message);
+            } else {
+              console.warn("[login] agency_agents insert error:", insertErr.message);
+            }
+          }
+        } catch (insertErr: any) {
+          console.warn("[login] agency_agents insert exception:", insertErr?.message || insertErr);
         }
       }
 
@@ -446,18 +475,25 @@ function LoginContent() {
         .eq("id", authData.user.id)
         .single();
 
-      // Batch 1: also gate on agency_agents.is_approved. The profiles.status
-      // check is a defense-in-depth; the source of truth for "this agent may
-      // sign in" is the is_approved flag on the agency_agents row.
-      const { data: agentRow } = await supabase
-        .from("agency_agents")
-        .select("is_approved, status")
-        .eq("id", authData.user.id)
-        .maybeSingle();
+      // Approval gate: look up by email/phone (real agency_agents columns),
+      // never by `id = auth.users.id` or `user_id` — those 400 on this table.
+      // Uses the flexible helper so phone-based or email-based sessions both resolve.
+      const authEmail = (authData.user.email || email || "").trim().toLowerCase();
+      const authPhone = (authData.user as any)?.phone || (authData.user.user_metadata as any)?.phone || null;
+      let agentRow: any = null;
+      try {
+        const { fetchAgentByAuth } = await import("@/lib/agencyAgentService");
+        agentRow = await fetchAgentByAuth({ email: authEmail, phone: authPhone });
+      } catch {}
+      // Fallback: direct email lookup if helper unavailable / 400-tolerant miss
+      if (!agentRow && authEmail) {
+        try {
+          const { data } = await supabase.from("agency_agents").select("is_approved, status").eq("email", authEmail).maybeSingle();
+          agentRow = data || null;
+        } catch {}
+      }
 
-      const isApproved =
-        agentRow?.is_approved === true ||
-        profile?.status === "approved";
+      const isApproved = agentRow?.is_approved === true || agentRow?.status === "approved" || profile?.status === "approved";
 
       if (!isApproved) {
         setLoading(false);

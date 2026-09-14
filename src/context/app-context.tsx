@@ -137,16 +137,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (managerRow) {
           setUserRoleState("manager");
         } else {
-          const { data: agentRow } = await supabase
-            .from("agency_agents")
-            .select("id")
-            .eq("id", session.user.id)
-            .maybeSingle();
-          if (agentRow) {
-            setUserRoleState("agent");
-          } else {
-            setUserRoleState("passenger");
+          // Resolve agent by real agency_agents columns (email/phone),
+          // not by `id = auth.users.id` / `user_id` — those 400.
+          let isAgent = false;
+          try {
+            const { fetchAgentByAuth } = await import("@/lib/agencyAgentService");
+            const row = await fetchAgentByAuth({
+              email: (session.user.email || "") as string,
+              phone: (session.user as any)?.phone || (session.user.user_metadata as any)?.phone || null,
+            });
+            isAgent = !!row;
+          } catch {}
+          if (!isAgent) {
+            const em = (session.user.email || "").trim().toLowerCase();
+            if (em) {
+              try {
+                const { data } = await supabase.from("agency_agents").select("id").eq("email", em).maybeSingle();
+                isAgent = !!data;
+              } catch {}
+            }
           }
+          if (isAgent) setUserRoleState("agent");
+          else setUserRoleState("passenger");
         }
       } else {
         // No session — clear cached identity, do NOT keep stale role.

@@ -916,19 +916,27 @@ export default function AgencyDashboard() {
 
       <div className="px-4 -mt-3 print:hidden">
         <div className="bg-white rounded-xl p-1 border border-border flex shadow-sm">
-          {(["today", "verify", "manifest"] as const).map((tab) => (
+          {(["today", "verify", "manifest"] as const).map((tab) => {
+            const verifyCount = tab === "verify" ? pendingMoMoPayments.length : 0;
+            return (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`flex-1 py-2 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+              className={`flex-1 py-2 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer relative ${
                 activeTab === tab
                   ? "bg-primary text-white"
                   : "text-text-muted hover:text-text-primary"
               }`}
             >
               {tab === "today" ? "Today" : tab === "verify" ? "Verify" : "Manifest"}
+              {tab === "verify" && verifyCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-white text-[10px] font-extrabold flex items-center justify-center border-2 border-white shadow-sm leading-none">
+                  {verifyCount > 99 ? "99+" : verifyCount}
+                </span>
+              )}
             </button>
-          ))}
+            );
+          })}
         </div>
       </div>
 
