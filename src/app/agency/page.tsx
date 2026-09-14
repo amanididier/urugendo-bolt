@@ -122,9 +122,7 @@ export default function AgencyDashboard() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [bookings, setBookings] = useState<ExtendedBooking[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<
-    "today" | "schedule" | "verify" | "manifest"
-  >("today");
+  const [activeTab, setActiveTab] = useState<"today" | "verify" | "manifest">("today");
   const [manifestSubTab, setManifestSubTab] = useState<"incoming" | "outgoing">(
     "incoming",
   );
@@ -335,40 +333,16 @@ export default function AgencyDashboard() {
 
   const currentStationKey = cleanStationName(agentBranch);
 
-  const stationIncoming: ManifestTrip[] = trips
-    .filter((t) => cleanStationName(t.to || "").includes(currentStationKey))
-    .map((t, idx) => ({
-      id: `inc-${t.id || idx}`,
-      busPlate: t.plateNumber || "RAC 112D",
-      driverName: t.driverName || "Station Driver",
-      from: t.from,
-      to: getBranchName(agentBranch),
-      time: t.arrivalTime || t.departureTime,
-      capacity: t.totalSeats || 29,
-      urugendoPassengers: bookings.filter(
-        (b) =>
-          (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id &&
-          b.status !== "cancelled",
-      ).length,
-      status: t.status || "In Transit",
+  const verifiedBookings = bookings.filter((b) => b.status === "confirmed" || (b as any).payment_status === "verified" || b.status === "boarded");
+  const isTripDeparted = (trip: Trip) => { try { const d = (trip as any).date || new Date().toISOString().split("T")[0]; const tm = trip.departureTime || "08:00"; const dt = new Date(`${d}T${tm}`); return !isNaN(dt.getTime()) && Date.now() >= dt.getTime(); } catch { return false; } };
+  const displayTripStatus = (trip: Trip) => { if (trip.status === "delayed") return "delayed"; if (trip.status === "cancelled") return "cancelled"; if (trip.status === "departed" || trip.status === "arrived") return trip.status; return isTripDeparted(trip) ? "departed" : "pending"; };
+  const stationIncoming: ManifestTrip[] = trips.filter((t) => cleanStationName(t.to || "").includes(currentStationKey)).map((t, idx) => ({
+      id: `inc-${t.id || idx}`, busPlate: t.plateNumber || "RAC 112D", driverName: t.driverName || "Station Driver", from: t.from, to: getBranchName(agentBranch), time: t.arrivalTime || t.departureTime, capacity: t.totalSeats || 29,
+      urugendoPassengers: verifiedBookings.filter((b) => (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id && b.status !== "cancelled" && b.status !== "rejected").length, status: t.status || "In Transit",
     }));
-
-  const stationOutgoing: ManifestTrip[] = trips
-    .filter((t) => cleanStationName(t.from || "").includes(currentStationKey))
-    .map((t, idx) => ({
-      id: `out-${t.id || idx}`,
-      busPlate: t.plateNumber || "RAD 882D",
-      driverName: t.driverName || "Station Driver",
-      from: getBranchName(agentBranch),
-      to: t.to,
-      time: t.departureTime,
-      capacity: t.totalSeats || 29,
-      urugendoPassengers: bookings.filter(
-        (b) =>
-          (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id &&
-          b.status !== "cancelled",
-      ).length,
-      status: t.status || "Scheduled",
+  const stationOutgoing: ManifestTrip[] = trips.filter((t) => cleanStationName(t.from || "").includes(currentStationKey)).map((t, idx) => ({
+      id: `out-${t.id || idx}`, busPlate: t.plateNumber || "RAD 882D", driverName: t.driverName || "Station Driver", from: getBranchName(agentBranch), to: t.to, time: t.departureTime, capacity: t.totalSeats || 29,
+      urugendoPassengers: verifiedBookings.filter((b) => (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id && b.status !== "cancelled" && b.status !== "rejected").length, status: displayTripStatus(t),
     }));
 
   const handleSaveEmptySeats = (tripId: string) => {
@@ -442,9 +416,12 @@ export default function AgencyDashboard() {
             );
             const totalOnboard = trip.urugendoPassengers + paperTickets;
             const bg = idx % 2 === 0 ? "#FFFFFF" : "#F8FAFC";
+            const stateLabel = (trip as any).status === "pending" ? "PENDING" : "DEPARTED";
+            const stateBg = (trip as any).status === "pending" ? "#ECFDF5" : "#FEF2F2";
+            const stateFg = (trip as any).status === "pending" ? "#059669" : "#DC2626";
             return `
             <Row ss:Height="22" style="background-color: ${bg}; font-size: 11px;">
-              <Cell style="background-color: #FEF2F2; color: #DC2626; font-weight: bold; text-align: center;"><Data ss:Type="String">DEPARTED</Data></Cell>
+              <Cell style="background-color: ${stateBg}; color: ${stateFg}; font-weight: bold; text-align: center;"><Data ss:Type="String">${stateLabel}</Data></Cell>
               <Cell style="font-weight: bold;"><Data ss:Type="String">${trip.busPlate}</Data></Cell>
               <Cell><Data ss:Type="String">${trip.driverName}</Data></Cell>
               <Cell><Data ss:Type="String">${branchName}</Data></Cell>
@@ -514,7 +491,7 @@ export default function AgencyDashboard() {
   };
 
   const pendingMoMoPayments: PendingMoMoPayment[] = bookings
-    .filter((b) => b.status === "pending" || b.status === "payment_submitted")
+    .filter((b) => (b.status === "pending" || b.status === "payment_submitted") && (b as any).payment_status !== "verified")
     .map((b) => {
       const tripObj = b.trip && typeof b.trip === "object" ? b.trip : null;
       const createdDate = b.createdAt ? new Date(b.createdAt) : new Date();
@@ -707,12 +684,14 @@ export default function AgencyDashboard() {
 
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
+      case "pending":
+        return "bg-emerald-100 text-emerald-700 border-emerald-200";
       case "boarding":
         return "bg-green-100 text-green-700";
       case "scheduled":
         return "bg-blue-100 text-blue-700";
       case "departed":
-        return "bg-gray-100 text-gray-600";
+        return "bg-red-50 text-red-700 border-red-200";
       case "arrived":
         return "bg-green-100 text-green-700";
       case "delayed":
@@ -830,7 +809,7 @@ export default function AgencyDashboard() {
 
       <div className="px-4 -mt-3 print:hidden">
         <div className="bg-white rounded-xl p-1 border border-border flex shadow-sm">
-          {(["today", "schedule", "verify", "manifest"] as const).map((tab) => (
+          {(["today", "verify", "manifest"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -840,13 +819,7 @@ export default function AgencyDashboard() {
                   : "text-text-muted hover:text-text-primary"
               }`}
             >
-              {tab === "today"
-                ? "Today"
-                : tab === "schedule"
-                  ? "Schedule"
-                  : tab === "verify"
-                    ? "Verify"
-                    : "Manifest"}
+              {tab === "today" ? "Today" : tab === "verify" ? "Verify" : "Manifest"}
             </button>
           ))}
         </div>
@@ -951,7 +924,7 @@ export default function AgencyDashboard() {
 
           <div className="grid grid-cols-2 gap-2">
             <button
-              onClick={() => setActiveTab("schedule")}
+              onClick={() => router.push("/agency/schedule")}
               className="bg-white rounded-xl py-3 border border-border flex items-center justify-center gap-2 shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all cursor-pointer"
             >
               <Plus size={16} className="text-primary" />
@@ -969,148 +942,6 @@ export default function AgencyDashboard() {
               </span>
             </button>
           </div>
-        </div>
-      )}
-
-      {activeTab === "schedule" && (
-        <div className="px-4 mt-4">
-          <button
-            onClick={() => router.push("/agency/schedule")}
-            className="w-full bg-primary text-white rounded-xl py-3 flex items-center justify-center gap-2 font-bold mb-4 shadow-sm active:scale-[0.98] transition-transform cursor-pointer"
-          >
-            <Plus size={18} />
-            Add New Departure from {agentBranch}
-          </button>
-
-          {trips.length === 0 ? (
-            <div className="text-center py-8 text-text-muted text-[13px]">
-              No departures scheduled for {agentBranch} today
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {trips.map((trip, i) => {
-                const tripBookings = bookings.filter((b) => {
-                  const bTripId =
-                    typeof b.trip === "string" ? b.trip : b.trip?.id;
-                  return bTripId === trip.id && b.status !== "cancelled";
-                });
-                const bookedCount = tripBookings.length;
-
-                return (
-                  <motion.div
-                    key={trip.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.05 }}
-                    onClick={() =>
-                      router.push(`/agency/schedule?tripId=${trip.id}`)
-                    }
-                    className="bg-white rounded-xl border border-border overflow-hidden shadow-sm hover:border-primary cursor-pointer transition-all"
-                  >
-                    <div className="px-4 py-2 bg-surface-secondary flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Clock size={12} className="text-text-muted" />
-                        <span className="text-[13px] font-bold text-text-primary">
-                          {trip.departureTime}
-                        </span>
-                        <span className="text-[11px] text-text-muted">
-                          → {trip.arrivalTime || "Calc"}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${getStatusColor(
-                            trip.status || "scheduled",
-                          )}`}
-                        >
-                          {(trip.status || "SCHEDULED").toUpperCase()}
-                        </span>
-                        <ChevronRight size={14} className="text-text-muted" />
-                      </div>
-                    </div>
-
-                    <div className="p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <MapPin size={12} className="text-primary" />
-                          <span className="text-[12px] font-semibold text-text-primary">
-                            {trip.from} → {trip.to}
-                          </span>
-                        </div>
-                        <span className="text-[10px] font-medium text-text-muted bg-gray-100 px-2 py-0.5 rounded">
-                          {trip.plateNumber || "RAC 302 C"}
-                        </span>
-                      </div>
-
-                      <div className="mb-2 bg-emerald-50/70 border border-emerald-100 rounded-lg p-2 text-[11px] flex items-center justify-between">
-                        <span className="font-bold text-emerald-800 flex items-center gap-1.5">
-                          <Users size={13} className="text-emerald-600" />
-                          Weka Passengers:
-                        </span>
-                        <span className="font-extrabold text-emerald-700 bg-white px-2 py-0.5 rounded-md shadow-2xs">
-                          {bookedCount} subscribed
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-                        <div className="flex items-center gap-3">
-                          <div className="text-center">
-                            <div className="text-[14px] font-bold text-primary">
-                              {bookedCount}
-                            </div>
-                            <div className="text-[8px] text-text-muted">
-                              Booked
-                            </div>
-                          </div>
-                          <div className="text-center">
-                            <div className="text-[14px] font-bold text-green-600">
-                              {Math.max(
-                                0,
-                                (trip.totalSeats || 29) - bookedCount,
-                              )}
-                            </div>
-                            <div className="text-[8px] text-text-muted">
-                              Remaining
-                            </div>
-                          </div>
-                          <div className="text-center">
-                            <div className="text-[14px] font-bold text-text-muted">
-                              {trip.totalSeats || 29}
-                            </div>
-                            <div className="text-[8px] text-text-muted">
-                              Total
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          {trip.status !== "delayed" && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleMarkDelayed(trip.id);
-                              }}
-                              className="text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded-md hover:bg-orange-100 cursor-pointer"
-                            >
-                              Mark Delayed
-                            </button>
-                          )}
-                          <div className="text-right">
-                            <div className="text-[14px] font-bold text-text-primary">
-                              {(trip.price * bookedCount).toLocaleString()}
-                            </div>
-                            <div className="text-[8px] text-text-muted">
-                              RWF
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
-                );
-              })}
-            </div>
-          )}
         </div>
       )}
 
@@ -1478,8 +1309,8 @@ export default function AgencyDashboard() {
                             Driver: {trip.driverName} · Departed: {trip.time}
                           </p>
                         </div>
-                        <span className="bg-red-50/90 text-red-600 border border-red-100/80 text-[10.5px] font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap shrink-0">
-                          Left Station
+                        <span className={`${trip.status === "pending" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-red-50 text-red-600 border-red-200"} border text-[10.5px] font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap shrink-0`}>
+                          {trip.status === "pending" ? "Pending" : "Left Station"}
                         </span>
                       </div>
 

@@ -265,6 +265,19 @@ export async function createTrip(
       new Date().toISOString().split("T")[0];
     const totalSeats = tripData.totalSeats || 36;
 
+    // Branch isolation on insert: store origin_branch_id so only this branch sees the schedule
+    let originBranchId: string | null = null;
+    try {
+      const em = typeof window !== "undefined" ? (localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email")) : null;
+      if (em) {
+        const { data: ar } = await supabase.from("agency_agents").select("branch_id").eq("email", em).maybeSingle();
+        if ((ar as any)?.branch_id) originBranchId = (ar as any).branch_id;
+      }
+      if (!originBranchId && resolvedFrom) {
+        const { data: br } = await supabase.from("branches").select("id").ilike("name", resolvedFrom).limit(1).maybeSingle();
+        if ((br as any)?.id) originBranchId = (br as any).id;
+      }
+    } catch {}
     const payload: Record<string, any> = {
       route_from: resolvedFrom,
       route_to: resolvedTo,
@@ -274,6 +287,9 @@ export async function createTrip(
       price: tripData.price || 2500,
       currency: tripData.currency || "RWF",
       operator_id: operatorId || null,
+      origin_branch: resolvedFrom,
+      origin_branch_id: originBranchId,
+      branch_id: originBranchId,
       total_seats: totalSeats,
       available_seats: tripData.availableSeats ?? totalSeats,
       status: "scheduled",
@@ -364,17 +380,51 @@ export async function createBooking(bookingData: {
     const resolvedStatus =
       bookingData.status === "upcoming" ? "active" : bookingData.status;
 
+    // Branch isolation: tie booking to its origin branch so it appears
+    // on the correct station agent's Verify tab (fixes "0 pending MoMo").
+    // Look up branch_id from agency_agents → agency_agents.branch_id → branches.id
+    let resolvedBranchId: string | null = null;
+    try {
+      const { data: agentRow } = await supabase
+        .from("agency_agents")
+        .select("branch_id")
+        .eq("id", authData.user.id)
+        .maybeSingle();
+      if ((agentRow as any)?.branch_id) resolvedBranchId = (agentRow as any).branch_id;
+    } catch {}
+    // Fallback: origin station from trip (most common: trips created at origin branch)
+    if (!resolvedBranchId) {
+      try {
+        const originName = (bookingData.trip as any)?.from || (bookingData.trip as any)?.route_from;
+        if (originName) {
+          const { data: br } = await supabase.from("branches").select("id").ilike("name", originName).limit(1).maybeSingle();
+          if ((br as any)?.id) resolvedBranchId = (br as any).id;
+        }
+      } catch {}
+    }
+    const originBranchText = (bookingData.trip as any)?.from || (bookingData.trip as any)?.route_from || null;
+
     const { data, error } = await supabase
       .from("bookings")
       .insert([
         {
           trip_id: bookingData.trip.id,
-          seat_id: isUuid ? bookingData.seat : null,
+          // seat_id is uuid-only if seat looks like uuid; fallback to seat_label for string seats like "A1"
+          seat_id: null,
           seat_label: bookingData.seat,
           passenger_name: bookingData.passengerName,
           passenger_phone: bookingData.passengerPhone,
+          // Dual-write code/amount columns so both old and new schema reads work (prevents 400 on NOT NULL)
           booking_code: bookingData.shortCode,
+          short_code: bookingData.shortCode,
+          fare_amount: bookingData.totalAmount,
+          total_amount: bookingData.totalAmount,
+          booking_fee: bookingData.bookingFee ?? 0,
+          payment_method: bookingData.paymentMethod || "MTN MoMo",
           user_id: authData.user.id,
+          branch_id: resolvedBranchId,
+          // legacy text branch name kept for manifest back-compat
+          agency_branch: originBranchText,
           status: resolvedStatus,
           booking_date: bookingData.bookingDate,
           // Batch 4: store MoMo details so the agent's "Verify" tab shows

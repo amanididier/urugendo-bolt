@@ -175,6 +175,7 @@ function AgencyScheduleContent() {
     })();
   }, []);
 
+  // Branch isolation: trips filtered by origin_branch_id when available, fallback to name match
   const loadTrips = useCallback(async () => {
     setLoading(true);
     const todayStr = new Date().toISOString().split("T")[0];
@@ -183,15 +184,33 @@ function AgencyScheduleContent() {
       fetchAllBookings(),
     ]);
 
-    const currentBranch =
-      localStorage.getItem("urugendo_branch") || agentBranch;
-    const branchClean = cleanStationName(currentBranch);
+    // Resolve current agent branch_id first (authoritative)
+    let currentBranchId: string | null = null;
+    try {
+      const em = localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email");
+      if (em) {
+        const { data: ar } = await supabase.from("agency_agents").select("branch_id").eq("email", em).maybeSingle();
+        if ((ar as any)?.branch_id) currentBranchId = (ar as any).branch_id;
+      }
+    } catch {}
 
-    const branchTrips = (tripData || []).filter((trip) => {
-      const tripFromClean = cleanStationName(trip.from || "");
-      return tripFromClean === branchClean;
-    });
+    let branchTrips: Trip[];
+    if (currentBranchId) {
+      // Prefer origin_branch_id scoping (no leakage). Fallback to text if trips have no FK yet.
+      const byId = (tripData || []).filter((t: any) => t.origin_branch_id === currentBranchId || t.branch_id === currentBranchId);
+      if (byId.length > 0) branchTrips = byId;
+      else {
+        const currentBranch = localStorage.getItem("urugendo_branch") || agentBranch;
+        const branchClean = cleanStationName(currentBranch);
+        branchTrips = (tripData || []).filter((trip) => cleanStationName(trip.from || "") === branchClean);
+      }
+    } else {
+      const currentBranch = localStorage.getItem("urugendo_branch") || agentBranch;
+      const branchClean = cleanStationName(currentBranch);
+      branchTrips = (tripData || []).filter((trip) => cleanStationName(trip.from || "") === branchClean);
+    }
 
+    // Booking isolation: only verified passengers counted in schedule cards is enforced in api.ts via branch_id
     setTrips(branchTrips);
     setBookings((bookingData as Booking[]) || []);
     setLoading(false);
@@ -707,15 +726,15 @@ function AgencyScheduleContent() {
             ) : (
               <div className="space-y-3">
                 {trips.map((trip) => {
-                  const tripBookings = bookings.filter(
+                  const vBookings = bookings.filter(
                     (b) =>
-                      (typeof b.trip === "string" ? b.trip : b.trip?.id) ===
-                        trip.id && b.status !== "cancelled",
+                      (typeof b.trip === "string" ? b.trip : b.trip?.id) === trip.id &&
+                      (b.status === "confirmed" || (b as any).payment_status === "verified" || b.status === "boarded"),
                   );
-                  const urugendoPassengersCount = tripBookings.length;
+                  const urugendoPassengersCount = vBookings.length;
                   const allVerified =
                     urugendoPassengersCount > 0 &&
-                    tripBookings.every((b) => b.status === "boarded");
+                    vBookings.every((b) => b.status === "boarded");
 
                   return (
                     <div
@@ -726,13 +745,13 @@ function AgencyScheduleContent() {
                       className="bg-white rounded-2xl border border-border p-4 shadow-sm space-y-3 cursor-pointer hover:border-primary transition-all relative overflow-hidden"
                     >
                       <div className="flex items-center justify-between border-b border-gray-100 pb-2.5">
-                        <div className="flex items-center gap-2">
-                          <MapPin size={16} className="text-primary" />
-                          <span className="text-[15px] font-black text-text-primary">
+                        <div className="flex items-center min-w-0 gap-2">
+                          <MapPin size={14} className="text-primary shrink-0" />
+                          <span className="text-[13px] font-black text-text-primary whitespace-nowrap truncate">
                             {trip.from} → {trip.to}
                           </span>
                           {trip.busType && (
-                            <span className="text-[9px] font-extrabold uppercase tracking-wider bg-gray-100 text-slate-600 px-2 py-0.5 rounded-md border border-gray-200">
+                            <span className="text-[9px] font-extrabold uppercase tracking-wider bg-gray-100 text-slate-600 px-2 py-0.5 rounded-md border border-gray-200 shrink-0">
                               {trip.busType}
                             </span>
                           )}
