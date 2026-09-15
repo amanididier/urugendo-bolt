@@ -35,10 +35,7 @@ import {
   updateTripStatus,
 } from "@/lib/api";
 import { fetchBranchRevenue } from "@/lib/branchService";
-import {
-  notifyPassengersOnTrip,
-  notifyUser,
-} from "@/lib/notificationsService";
+import { notifyPassengersOnTrip, notifyUser } from "@/lib/notificationsService";
 import {
   markPaymentVerified,
   markPaymentRejected,
@@ -122,7 +119,9 @@ export default function AgencyDashboard() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [bookings, setBookings] = useState<ExtendedBooking[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"today" | "verify" | "manifest">("today");
+  const [activeTab, setActiveTab] = useState<"today" | "verify" | "manifest">(
+    "today",
+  );
   const [manifestSubTab, setManifestSubTab] = useState<"incoming" | "outgoing">(
     "incoming",
   );
@@ -160,34 +159,72 @@ export default function AgencyDashboard() {
     let ch: any = null;
     supabase.auth.getUser().then(async ({ data }) => {
       const uid = data?.user?.id;
-      if (!uid) { if (mounted) setUnreadCount(0); return; }
+      if (!uid) {
+        if (mounted) setUnreadCount(0);
+        return;
+      }
       try {
-        const { count } = await supabase.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", uid).eq("read", false);
+        const { count } = await supabase
+          .from("notifications")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", uid)
+          .eq("read", false);
         if (mounted && typeof count === "number") setUnreadCount(count);
         // live badge — no refresh needed
-        ch = supabase.channel(`agent-notif-bell-${uid}`)
-          .on("postgres_changes" as any, { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${uid}` }, async () => {
-            const { count: c } = await supabase.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", uid).eq("read", false);
-            if (mounted && typeof c === "number") setUnreadCount(c);
-          })
+        ch = supabase
+          .channel(`agent-notif-bell-${uid}`)
+          .on(
+            "postgres_changes" as any,
+            {
+              event: "*",
+              schema: "public",
+              table: "notifications",
+              filter: `user_id=eq.${uid}`,
+            },
+            async () => {
+              const { count: c } = await supabase
+                .from("notifications")
+                .select("id", { count: "exact", head: true })
+                .eq("user_id", uid)
+                .eq("read", false);
+              if (mounted && typeof c === "number") setUnreadCount(c);
+            },
+          )
           .subscribe();
       } catch {}
     });
-    return () => { mounted = false; if (ch) supabase.removeChannel(ch); };
+    return () => {
+      mounted = false;
+      if (ch) supabase.removeChannel(ch);
+    };
   }, []);
 
   // Dynamic agency header — resolve from agent's actual agency/branch
   useEffect(() => {
-    const email = localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email");
+    const email =
+      localStorage.getItem("urugendo_agent_email") ||
+      localStorage.getItem("urugendo_user_email");
     if (!email) return;
-    supabase.from("agency_agents").select("agency_name, branch_name, branch_id").eq("email", email).maybeSingle().then(async ({ data }) => {
-      if (data?.agency_name) { setAgencyLabel(data.agency_name); return; }
-      // fallback: branches table if agency_name not set
-      if ((data as any)?.branch_id) {
-        const { data: br } = await supabase.from("branches").select("agency_name").eq("id", (data as any).branch_id).maybeSingle();
-        if ((br as any)?.agency_name) setAgencyLabel((br as any).agency_name);
-      }
-    });
+    supabase
+      .from("agency_agents")
+      .select("agency_name, branch_name, branch_id")
+      .eq("email", email)
+      .maybeSingle()
+      .then(async ({ data }) => {
+        if (data?.agency_name) {
+          setAgencyLabel(data.agency_name);
+          return;
+        }
+        // fallback: branches table if agency_name not set
+        if ((data as any)?.branch_id) {
+          const { data: br } = await supabase
+            .from("branches")
+            .select("agency_name")
+            .eq("id", (data as any).branch_id)
+            .maybeSingle();
+          if ((br as any)?.agency_name) setAgencyLabel((br as any).agency_name);
+        }
+      });
   }, []);
 
   // Added Supabase Real-Time Agent Approval Listener & Session Guard
@@ -212,7 +249,11 @@ export default function AgencyDashboard() {
           // Batch 2: store the branch FK for scoped queries.
           if (data.branch_id) {
             setAgentBranchId(data.branch_id);
-            setAgentBranch(data.branch_name || localStorage.getItem("urugendo_branch") || "Musanze");
+            setAgentBranch(
+              data.branch_name ||
+                localStorage.getItem("urugendo_branch") ||
+                "Musanze",
+            );
           }
           if (data.status === "pending") {
             setShowApprovalModal(true);
@@ -316,18 +357,30 @@ export default function AgencyDashboard() {
         }
 
         const todayStr = new Date().toISOString().split("T")[0];
-        const [todayTrips, branchRevenue, branchBookingsRaw] = await Promise.all([
-          fetchTripsByDate(todayStr),
-          resolvedBranchId ? fetchBranchRevenue(resolvedBranchId, "today") : Promise.resolve({ passengers: 0, revenue: 0 }),
-          resolvedBranchId ? fetchBookingsByBranch(resolvedBranchId) : Promise.resolve([] as any),
-        ]);
+        const [todayTrips, branchRevenue, branchBookingsRaw] =
+          await Promise.all([
+            fetchTripsByDate(todayStr),
+            resolvedBranchId
+              ? fetchBranchRevenue(resolvedBranchId, "today")
+              : Promise.resolve({ passengers: 0, revenue: 0 }),
+            resolvedBranchId
+              ? fetchBookingsByBranch(resolvedBranchId)
+              : Promise.resolve([] as any),
+          ]);
 
         if (!isMounted) return;
         setAgentBranchId(resolvedBranchId);
         const currentStation = cleanStationName(branch);
         const branchTrips = (todayTrips || []).filter((t: any) => {
-          if (t.origin_branch_id && resolvedBranchId) return t.origin_branch_id === resolvedBranchId || t.branch_id === resolvedBranchId;
-          return cleanStationName(t.from || "").includes(currentStation) || cleanStationName(t.to || "").includes(currentStation);
+          if (t.origin_branch_id && resolvedBranchId)
+            return (
+              t.origin_branch_id === resolvedBranchId ||
+              t.branch_id === resolvedBranchId
+            );
+          return (
+            cleanStationName(t.from || "").includes(currentStation) ||
+            cleanStationName(t.to || "").includes(currentStation)
+          );
         });
         setTrips(branchTrips);
         setBookings((branchBookingsRaw as ExtendedBooking[]) || []);
@@ -350,57 +403,109 @@ export default function AgencyDashboard() {
   useEffect(() => {
     if (!agentBranchId) return;
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { supabase: sb } = require("@/lib/supabase") as { supabase: typeof supabase };
+    const { supabase: sb } = require("@/lib/supabase") as {
+      supabase: typeof supabase;
+    };
     const chBookings = sb
       .channel(`agency-bookings-${agentBranchId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "bookings", filter: `branch_id=eq.${agentBranchId}` }, (payload: any) => {
-        const row = payload.new;
-        if (!row) return;
-        // Map row -> ExtendedBooking shape (light), merge into list
-        const mapped: any = {
-          id: row.id, status: row.status, payment_status: row.payment_status ?? row.paymentStatus,
-          passengerName: row.passenger_name, passengerPhone: row.passenger_phone,
-          momoName: row.momo_name, momoNumber: row.momo_number,
-          shortCode: row.booking_code || row.short_code, seat: row.seat_label || row.seat_id,
-          totalAmount: row.fare_amount ?? row.total_amount, createdAt: row.created_at,
-          trip: row.trip_id ? { id: row.trip_id } : undefined, branchId: row.branch_id,
-        };
-        setBookings((prev) => {
-          if (payload.eventType === "INSERT") return [mapped, ...prev];
-          if (payload.eventType === "UPDATE") return prev.map((b) => (b.id === row.id ? { ...b, ...mapped } : b));
-          if (payload.eventType === "DELETE") return prev.filter((b) => b.id !== (payload.old?.id ?? row.id));
-          return prev;
-        });
-      })
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "bookings",
+          filter: `branch_id=eq.${agentBranchId}`,
+        },
+        (payload: any) => {
+          const row = payload.new;
+          if (!row) return;
+          // Map row -> ExtendedBooking shape (light), merge into list
+          const mapped: any = {
+            id: row.id,
+            status: row.status,
+            payment_status: row.payment_status ?? row.paymentStatus,
+            passengerName: row.passenger_name,
+            passengerPhone: row.passenger_phone,
+            momoName: row.momo_name,
+            momoNumber: row.momo_number,
+            shortCode: row.booking_code || row.short_code,
+            seat: row.seat_label || row.seat_id,
+            totalAmount: row.fare_amount ?? row.total_amount,
+            createdAt: row.created_at,
+            trip: row.trip_id ? { id: row.trip_id } : undefined,
+            branchId: row.branch_id,
+          };
+          setBookings((prev) => {
+            if (payload.eventType === "INSERT") return [mapped, ...prev];
+            if (payload.eventType === "UPDATE")
+              return prev.map((b) =>
+                b.id === row.id ? { ...b, ...mapped } : b,
+              );
+            if (payload.eventType === "DELETE")
+              return prev.filter((b) => b.id !== (payload.old?.id ?? row.id));
+            return prev;
+          });
+        },
+      )
       .subscribe();
     const chTrips = sb
       .channel(`agency-trips-${agentBranchId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "trips" }, (payload: any) => {
-        const row = payload.new;
-        const oldRow = payload.old;
-        // Only care about trips for this agent's branch
-        const matches = row ? (row.origin_branch_id === agentBranchId || row.branch_id === agentBranchId) : false;
-        const oldMatches = oldRow ? (oldRow.origin_branch_id === agentBranchId || oldRow.branch_id === agentBranchId) : false;
-        if (payload.eventType === "INSERT" && matches) {
-          // Trigger a light reload of trips (keeps operator join correct) — cheap, no bookings reload
-          fetchTripsByDate(new Date().toISOString().split("T")[0]).then((all) => {
-            setTrips((prev) => {
-              const filtered = all.filter((t: any) => t.origin_branch_id === agentBranchId || t.branch_id === agentBranchId || cleanStationName(t.from || "").includes(cleanStationName(agentBranch)));
-              // merge by id to avoid duplicates
-              const byId = new Map(prev.map((t) => [t.id, t]));
-              for (const t of filtered) byId.set(t.id, t);
-              return Array.from(byId.values());
-            });
-          });
-          return;
-        }
-        if (payload.eventType === "UPDATE" && (matches || oldMatches)) {
-          setTrips((prev) => prev.map((t) => (t.id === row.id ? { ...t, status: row.status, departureTime: row.departure_time ?? t.departureTime, arrivalTime: row.arrival_time ?? t.arrivalTime } : t)));
-        }
-        if (payload.eventType === "DELETE" && oldMatches) {
-          setTrips((prev) => prev.filter((t) => t.id !== oldRow.id));
-        }
-      })
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "trips" },
+        (payload: any) => {
+          const row = payload.new;
+          const oldRow = payload.old;
+          // Only care about trips for this agent's branch
+          const matches = row
+            ? row.origin_branch_id === agentBranchId ||
+              row.branch_id === agentBranchId
+            : false;
+          const oldMatches = oldRow
+            ? oldRow.origin_branch_id === agentBranchId ||
+              oldRow.branch_id === agentBranchId
+            : false;
+          if (payload.eventType === "INSERT" && matches) {
+            // Trigger a light reload of trips (keeps operator join correct) — cheap, no bookings reload
+            fetchTripsByDate(new Date().toISOString().split("T")[0]).then(
+              (all) => {
+                setTrips((prev) => {
+                  const filtered = all.filter(
+                    (t: any) =>
+                      t.origin_branch_id === agentBranchId ||
+                      t.branch_id === agentBranchId ||
+                      cleanStationName(t.from || "").includes(
+                        cleanStationName(agentBranch),
+                      ),
+                  );
+                  // merge by id to avoid duplicates
+                  const byId = new Map(prev.map((t) => [t.id, t]));
+                  for (const t of filtered) byId.set(t.id, t);
+                  return Array.from(byId.values());
+                });
+              },
+            );
+            return;
+          }
+          if (payload.eventType === "UPDATE" && (matches || oldMatches)) {
+            setTrips((prev) =>
+              prev.map((t) =>
+                t.id === row.id
+                  ? {
+                      ...t,
+                      status: row.status,
+                      departureTime: row.departure_time ?? t.departureTime,
+                      arrivalTime: row.arrival_time ?? t.arrivalTime,
+                    }
+                  : t,
+              ),
+            );
+          }
+          if (payload.eventType === "DELETE" && oldMatches) {
+            setTrips((prev) => prev.filter((t) => t.id !== oldRow.id));
+          }
+        },
+      )
       .subscribe();
     return () => {
       sb.removeChannel(chBookings);
@@ -410,56 +515,137 @@ export default function AgencyDashboard() {
 
   const currentStationKey = cleanStationName(agentBranch);
 
-  const verifiedBookings = bookings.filter((b) => b.status === "confirmed" || (b as any).payment_status === "verified" || b.status === "boarded");
-  const isTripDeparted = (trip: Trip) => { try { const d = (trip as any).date || new Date().toISOString().split("T")[0]; const tm = trip.departureTime || "08:00"; const dt = new Date(`${d}T${tm}`); return !isNaN(dt.getTime()) && Date.now() >= dt.getTime(); } catch { return false; } };
-  const displayTripStatus = (trip: Trip) => { if (trip.status === "delayed") return "delayed"; if (trip.status === "cancelled") return "cancelled"; if (trip.status === "departed" || trip.status === "arrived") return trip.status; return isTripDeparted(trip) ? "departed" : "pending"; };
+  const verifiedBookings = bookings.filter(
+    (b) =>
+      b.status === "confirmed" ||
+      (b as any).payment_status === "verified" ||
+      b.status === "boarded",
+  );
+  const isTripDeparted = (trip: Trip) => {
+    try {
+      const d = (trip as any).date || new Date().toISOString().split("T")[0];
+      const tm = trip.departureTime || "08:00";
+      const dt = new Date(`${d}T${tm}`);
+      return !isNaN(dt.getTime()) && Date.now() >= dt.getTime();
+    } catch {
+      return false;
+    }
+  };
+  const displayTripStatus = (trip: Trip) => {
+    if (trip.status === "delayed") return "delayed";
+    if (trip.status === "cancelled") return "cancelled";
+    if (trip.status === "departed" || trip.status === "arrived")
+      return trip.status;
+    return isTripDeparted(trip) ? "departed" : "pending";
+  };
 
   // Threshold-based batching: notify agent at 5 pending, or at 5min if 1-4 still pending (no spam per-tx)
-  const batchNotifRef = React.useRef<{ lastCount: number; timer: ReturnType<typeof setTimeout> | null; lastBatchAt: number }>({ lastCount: 0, timer: null, lastBatchAt: 0 });
+  const batchNotifRef = React.useRef<{
+    lastCount: number;
+    timer: ReturnType<typeof setTimeout> | null;
+    lastBatchAt: number;
+  }>({ lastCount: 0, timer: null, lastBatchAt: 0 });
   useEffect(() => {
-    const pending = bookings.filter((b) => b.status === "pending" || b.status === "payment_submitted" || (b as any).payment_status === "submitted").length;
+    const pending = bookings.filter(
+      (b) =>
+        b.status === "pending" ||
+        b.status === "payment_submitted" ||
+        (b as any).payment_status === "submitted",
+    ).length;
     const ref = batchNotifRef.current;
     if (pending >= 5 && ref.lastCount < 5) {
       // hit threshold 5 — immediate batch alert
       ref.lastCount = pending;
       ref.lastBatchAt = Date.now();
-      if (ref.timer) { clearTimeout(ref.timer); ref.timer = null; }
+      if (ref.timer) {
+        clearTimeout(ref.timer);
+        ref.timer = null;
+      }
       supabase.auth.getUser().then(async ({ data }) => {
         const uid = data?.user?.id;
         if (!uid) return;
         const { supabase: sb } = await import("@/lib/supabase");
         // also bump bell via notifications row so badge reflects
-        await sb.from("notifications").insert({ user_id: uid, title: "MoMo queue — 5 pending", message: `You have ${pending} unconfirmed MoMo payments awaiting verification.`, type: "reminder" } as any);
+        await sb.from("notifications").insert({
+          user_id: uid,
+          title: "MoMo queue — 5 pending",
+          message: `You have ${pending} unconfirmed MoMo payments awaiting verification.`,
+          type: "reminder",
+        } as any);
       });
       return;
     }
     if (pending > 0 && pending < 5) {
       if (ref.timer) clearTimeout(ref.timer);
-      ref.timer = setTimeout(() => {
-        if (Date.now() - ref.lastBatchAt < 4 * 60 * 1000) return;
-        ref.lastBatchAt = Date.now();
-        supabase.auth.getUser().then(async ({ data }) => {
-          const uid = data?.user?.id;
-          if (!uid) return;
-          const { supabase: sb } = await import("@/lib/supabase");
-          await sb.from("notifications").insert({ user_id: uid, title: "Pending MoMo reminder", message: `You have ${pending} pending payment(s) waiting ≥5 min — please verify.`, type: "reminder" } as any);
-        });
-      }, 5 * 60 * 1000);
+      ref.timer = setTimeout(
+        () => {
+          if (Date.now() - ref.lastBatchAt < 4 * 60 * 1000) return;
+          ref.lastBatchAt = Date.now();
+          supabase.auth.getUser().then(async ({ data }) => {
+            const uid = data?.user?.id;
+            if (!uid) return;
+            const { supabase: sb } = await import("@/lib/supabase");
+            await sb.from("notifications").insert({
+              user_id: uid,
+              title: "Pending MoMo reminder",
+              message: `You have ${pending} pending payment(s) waiting ≥5 min — please verify.`,
+              type: "reminder",
+            } as any);
+          });
+        },
+        5 * 60 * 1000,
+      );
       ref.lastCount = pending;
-      return () => { if (ref.timer) { clearTimeout(ref.timer); ref.timer = null; } };
+      return () => {
+        if (ref.timer) {
+          clearTimeout(ref.timer);
+          ref.timer = null;
+        }
+      };
     }
     if (pending === 0) {
-      if (ref.timer) { clearTimeout(ref.timer); ref.timer = null; }
+      if (ref.timer) {
+        clearTimeout(ref.timer);
+        ref.timer = null;
+      }
       ref.lastCount = 0;
     }
   }, [bookings]);
-  const stationIncoming: ManifestTrip[] = trips.filter((t) => cleanStationName(t.to || "").includes(currentStationKey)).map((t, idx) => ({
-      id: `inc-${t.id || idx}`, busPlate: t.plateNumber || "RAC 112D", driverName: t.driverName || "Station Driver", from: t.from, to: getBranchName(agentBranch), time: t.arrivalTime || t.departureTime, capacity: t.totalSeats || 29,
-      urugendoPassengers: verifiedBookings.filter((b) => (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id && b.status !== "cancelled" && b.status !== "rejected").length, status: t.status || "In Transit",
+  const stationIncoming: ManifestTrip[] = trips
+    .filter((t) => cleanStationName(t.to || "").includes(currentStationKey))
+    .map((t, idx) => ({
+      id: `inc-${t.id || idx}`,
+      busPlate: t.plateNumber || "RAC 112D",
+      driverName: t.driverName || "Station Driver",
+      from: t.from,
+      to: getBranchName(agentBranch),
+      time: t.arrivalTime || t.departureTime,
+      capacity: t.totalSeats || 29,
+      urugendoPassengers: verifiedBookings.filter(
+        (b) =>
+          (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id &&
+          b.status !== "cancelled" &&
+          b.status !== "rejected",
+      ).length,
+      status: t.status || "In Transit",
     }));
-  const stationOutgoing: ManifestTrip[] = trips.filter((t) => cleanStationName(t.from || "").includes(currentStationKey)).map((t, idx) => ({
-      id: `out-${t.id || idx}`, busPlate: t.plateNumber || "RAD 882D", driverName: t.driverName || "Station Driver", from: getBranchName(agentBranch), to: t.to, time: t.departureTime, capacity: t.totalSeats || 29,
-      urugendoPassengers: verifiedBookings.filter((b) => (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id && b.status !== "cancelled" && b.status !== "rejected").length, status: displayTripStatus(t),
+  const stationOutgoing: ManifestTrip[] = trips
+    .filter((t) => cleanStationName(t.from || "").includes(currentStationKey))
+    .map((t, idx) => ({
+      id: `out-${t.id || idx}`,
+      busPlate: t.plateNumber || "RAD 882D",
+      driverName: t.driverName || "Station Driver",
+      from: getBranchName(agentBranch),
+      to: t.to,
+      time: t.departureTime,
+      capacity: t.totalSeats || 29,
+      urugendoPassengers: verifiedBookings.filter(
+        (b) =>
+          (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id &&
+          b.status !== "cancelled" &&
+          b.status !== "rejected",
+      ).length,
+      status: displayTripStatus(t),
     }));
 
   const handleSaveEmptySeats = (tripId: string) => {
@@ -533,9 +719,12 @@ export default function AgencyDashboard() {
             );
             const totalOnboard = trip.urugendoPassengers + paperTickets;
             const bg = idx % 2 === 0 ? "#FFFFFF" : "#F8FAFC";
-            const stateLabel = (trip as any).status === "pending" ? "PENDING" : "DEPARTED";
-            const stateBg = (trip as any).status === "pending" ? "#ECFDF5" : "#FEF2F2";
-            const stateFg = (trip as any).status === "pending" ? "#059669" : "#DC2626";
+            const stateLabel =
+              (trip as any).status === "pending" ? "PENDING" : "DEPARTED";
+            const stateBg =
+              (trip as any).status === "pending" ? "#ECFDF5" : "#FEF2F2";
+            const stateFg =
+              (trip as any).status === "pending" ? "#059669" : "#DC2626";
             return `
             <Row ss:Height="22" style="background-color: ${bg}; font-size: 11px;">
               <Cell style="background-color: ${stateBg}; color: ${stateFg}; font-weight: bold; text-align: center;"><Data ss:Type="String">${stateLabel}</Data></Cell>
@@ -608,15 +797,23 @@ export default function AgencyDashboard() {
   };
 
   const pendingMoMoPayments: PendingMoMoPayment[] = bookings
-    .filter((b) => (b.status === "pending" || b.status === "payment_submitted") && (b as any).payment_status !== "verified")
+    .filter((b) => {
+      const isPendingStatus =
+        b.status === "pending" ||
+        b.status === "payment_submitted" ||
+        (b as any).payment_status === "submitted";
+      const isNotYetVerified = (b as any).payment_status !== "verified";
+      return isPendingStatus && isNotYetVerified;
+    })
     .map((b) => {
       const tripObj = b.trip && typeof b.trip === "object" ? b.trip : null;
       const createdDate = b.createdAt ? new Date(b.createdAt) : new Date();
 
       return {
         id: b.id,
-        momoName: b.momoName || "MTN Subscriber",
-        momoNumber: b.momoNumber || b.passengerPhone || "0780000000",
+        momoName: b.momoName || b.momoAccountName || "MTN Subscriber",
+        momoNumber:
+          b.momoNumber || b.momoPhoneNumber || b.passengerPhone || "0780000000",
         passengerName: b.passengerName || "Passenger",
         tripRoute: tripObj
           ? `${tripObj.from} → ${tripObj.to}`
@@ -627,12 +824,11 @@ export default function AgencyDashboard() {
           hour: "2-digit",
           minute: "2-digit",
         }),
-        amount: b.totalAmount || 5000,
+        amount: b.totalAmount || 2500,
         status: "pending",
         shortCode: b.shortCode || b.id.substring(0, 6).toUpperCase(),
       };
     });
-
   const activeBookings = bookings.filter((b) => b.status !== "cancelled");
   // Batch 2: revenue comes from the bookings table via fetchBranchRevenue.
   // todayRevenueData is loaded in loadDashboardData — falls back to 0 when
@@ -659,27 +855,23 @@ export default function AgencyDashboard() {
     const query = searchSeat.toUpperCase().trim();
 
     let found = bookings.find((b) => {
-      return (
+      const seatMatch =
         b.seatNumber?.toUpperCase() === query ||
-        (b.seat && String(b.seat).toUpperCase() === query) ||
-        b.id.toUpperCase().includes(query) ||
-        b.passengerName?.toUpperCase().includes(query) ||
-        b.shortCode?.toUpperCase() === query
-      );
+        (b.seat && String(b.seat).toUpperCase() === query);
+      const codeMatch =
+        b.shortCode?.toUpperCase() === query ||
+        b.id?.toUpperCase().includes(query);
+      const nameMatch = b.passengerName?.toUpperCase().includes(query);
+      return seatMatch || codeMatch || nameMatch;
     });
 
     if (!found) {
       const remoteBooking = await fetchBookingById(query);
       if (remoteBooking) {
-        const tripFrom = remoteBooking.trip?.from
-          ? cleanStationName(remoteBooking.trip.from)
-          : "";
-        if (tripFrom.includes(currentStationKey) || !tripFrom) {
-          found = {
-            ...remoteBooking,
-            seatNumber: remoteBooking.seat,
-          };
-        }
+        found = {
+          ...remoteBooking,
+          seatNumber: remoteBooking.seat,
+        };
       }
     }
 
@@ -697,7 +889,9 @@ export default function AgencyDashboard() {
     if (success) {
       setBookings((prev) =>
         prev.map((b) =>
-          b.id === bookingId ? { ...b, status: "confirmed", payment_status: "verified" as any } : b,
+          b.id === bookingId
+            ? { ...b, status: "confirmed", payment_status: "verified" as any }
+            : b,
         ),
       );
       // Trigger notification so the passenger knows the ticket is confirmed.
@@ -867,7 +1061,7 @@ export default function AgencyDashboard() {
                 Agency Dashboard
               </h1>
               <p className="text-[12px] text-white/80 font-medium">
-                {(agencyLabel || "Weka Express")} • {agentBranch}
+                {agencyLabel || "Weka Express"} • {agentBranch}
               </p>
             </div>
           </div>
@@ -917,24 +1111,29 @@ export default function AgencyDashboard() {
       <div className="px-4 -mt-3 print:hidden">
         <div className="bg-white rounded-xl p-1 border border-border flex shadow-sm">
           {(["today", "verify", "manifest"] as const).map((tab) => {
-            const verifyCount = tab === "verify" ? pendingMoMoPayments.length : 0;
+            const verifyCount =
+              tab === "verify" ? pendingMoMoPayments.length : 0;
             return (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`flex-1 py-2 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer relative ${
-                activeTab === tab
-                  ? "bg-primary text-white"
-                  : "text-text-muted hover:text-text-primary"
-              }`}
-            >
-              {tab === "today" ? "Today" : tab === "verify" ? "Verify" : "Manifest"}
-              {tab === "verify" && verifyCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-white text-[10px] font-extrabold flex items-center justify-center border-2 border-white shadow-sm leading-none">
-                  {verifyCount > 99 ? "99+" : verifyCount}
-                </span>
-              )}
-            </button>
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`flex-1 py-2 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer relative ${
+                  activeTab === tab
+                    ? "bg-primary text-white"
+                    : "text-text-muted hover:text-text-primary"
+                }`}
+              >
+                {tab === "today"
+                  ? "Today"
+                  : tab === "verify"
+                    ? "Verify"
+                    : "Manifest"}
+                {tab === "verify" && verifyCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-white text-[10px] font-extrabold flex items-center justify-center border-2 border-white shadow-sm leading-none">
+                    {verifyCount > 99 ? "99+" : verifyCount}
+                  </span>
+                )}
+              </button>
             );
           })}
         </div>
@@ -1424,8 +1623,12 @@ export default function AgencyDashboard() {
                             Driver: {trip.driverName} · Departed: {trip.time}
                           </p>
                         </div>
-                        <span className={`${trip.status === "pending" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-red-50 text-red-600 border-red-200"} border text-[10.5px] font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap shrink-0`}>
-                          {trip.status === "pending" ? "Pending" : "Left Station"}
+                        <span
+                          className={`${trip.status === "pending" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-red-50 text-red-600 border-red-200"} border text-[10.5px] font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap shrink-0`}
+                        >
+                          {trip.status === "pending"
+                            ? "Pending"
+                            : "Left Station"}
                         </span>
                       </div>
 
