@@ -86,6 +86,8 @@ export interface Trip {
   routeFrom?: string;
   terminalFrom?: string;
   terminalTo?: string;
+  origin_branch_id?: string | null;
+  branch_id?: string | null;
 }
 
 // ==========================================
@@ -100,6 +102,8 @@ export interface Booking {
   passengerPhone?: string;
   momoAccountName?: string;
   momoPhoneNumber?: string;
+  momoName?: string;
+  momoNumber?: string;
   paymentTime?: string;
   shortCode?: string;
   paymentMethod?: string;
@@ -107,17 +111,21 @@ export interface Booking {
   bookingFee?: number;
   status?:
     | "pending"
+    | "payment_submitted"
     | "confirmed"
     | "rejected"
     | "cancelled"
     | "upcoming"
+    | "active"
     | "past"
     | "boarded"
     | "used"
     | string;
+  payment_status?: "unpaid" | "submitted" | "verified" | "failed" | string;
   bookingDate?: string;
   createdAt?: string;
   userId?: string;
+  branchId?: string; // branches.id FK — populated in formatBookingData for ticket display
   verifiedByAgentId?: string;
 }
 

@@ -15,7 +15,8 @@ import {
   Search,
   ChevronRight,
 } from "lucide-react";
-import { fetchAllBookings, fetchTripsByDate } from "@/lib/api";
+import { fetchBookingsByBranch, fetchTripsByDate } from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 import type { Booking, Trip, AgencyBranch } from "@/lib/types";
 
 interface ManifestRow {
@@ -130,11 +131,18 @@ export default function AgencyReportsPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [allBookings, todayTrips] = await Promise.all([
-        fetchAllBookings(),
-        fetchTripsByDate(selectedDate),
+      const em = localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email");
+      let branchId: string | null = null;
+      if (em) {
+        const { data: ar } = await supabase.from("agency_agents").select("branch_id").eq("email", em).maybeSingle();
+        branchId = (ar as any)?.branch_id || null;
+      }
+      if (!branchId) { setBookings([]); setTrips([]); setLoading(false); return; }
+      const [branchBookings, todayTrips] = await Promise.all([
+        fetchBookingsByBranch(branchId),
+        fetchTripsByDate(selectedDate, branchId),
       ]);
-      setBookings(allBookings || []);
+      setBookings(branchBookings || []);
       setTrips(todayTrips || []);
     } catch (error) {
       console.error("Failed to load agency reports data:", error);
@@ -149,7 +157,7 @@ export default function AgencyReportsPage() {
 
   useEffect(() => {
     if (userRole !== "agent") {
-      router.push("/login");
+      router.push("/agency/agency-login");
     }
   }, [userRole, router]);
 
@@ -280,10 +288,10 @@ export default function AgencyReportsPage() {
     const branchStr = getBranchName(selectedBranch);
     const text =
       reportType === "urugendo"
-        ? `*Virunga Express - Urugendo Digital Report*\n\nPeriod: ${selectedDate} (${filterPeriod})\nDigital Tickets Issued: ${
+        ? `*Bus Operator - Urugendo Digital Report*\n\nPeriod: ${selectedDate} (${filterPeriod})\nDigital Tickets Issued: ${
             filteredBookings.length
           }\nTotal Digital Revenue: ${urugendoRevenue.toLocaleString()} RWF\n\nAll-Time Digital: ${totalBookingsAllTime} tickets (${totalRevenueAllTime.toLocaleString()} RWF)`
-        : `*Virunga Express - Station Manifest Report*\n\nStation Branch: ${branchStr}\nDate: ${selectedDate}\nTotal Buses Manifested: ${filteredManifest.length}\nTotal Urugendo Onboard: ${filteredManifest.reduce(
+        : `*Bus Operator - Station Manifest Report*\n\nStation Branch: ${branchStr}\nDate: ${selectedDate}\nTotal Buses Manifested: ${filteredManifest.length}\nTotal Urugendo Onboard: ${filteredManifest.reduce(
             (acc, m) => acc + m.urugendoPassengers,
             0,
           )}`;
