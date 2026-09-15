@@ -196,18 +196,10 @@ function AgencyScheduleContent() {
 
     let branchTrips: Trip[];
     if (currentBranchId) {
-      // Prefer origin_branch_id scoping (no leakage). Fallback to text if trips have no FK yet.
-      const byId = (tripData || []).filter((t: any) => t.origin_branch_id === currentBranchId || t.branch_id === currentBranchId);
-      if (byId.length > 0) branchTrips = byId;
-      else {
-        const currentBranch = localStorage.getItem("urugendo_branch") || agentBranch;
-        const branchClean = cleanStationName(currentBranch);
-        branchTrips = (tripData || []).filter((trip) => cleanStationName(trip.from || "") === branchClean);
-      }
+      branchTrips = (tripData || []).filter((t: any) => t.origin_branch_id === currentBranchId || t.branch_id === currentBranchId);
     } else {
-      const currentBranch = localStorage.getItem("urugendo_branch") || agentBranch;
-      const branchClean = cleanStationName(currentBranch);
-      branchTrips = (tripData || []).filter((trip) => cleanStationName(trip.from || "") === branchClean);
+      // No branch_id on this agent — fail closed rather than text-match across agencies (was leaking Virunga into Fasta)
+      branchTrips = [];
     }
 
     // Booking isolation: only verified passengers counted in schedule cards is enforced in api.ts via branch_id

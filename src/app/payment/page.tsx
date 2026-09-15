@@ -110,7 +110,7 @@ export default function PaymentPage() {
           const r = await supabase.from("branches").select("momo_code").eq("id", tripBranchId).maybeSingle();
           data = r.data || null;
         }
-        if (!data && tripFrom) {
+        if (!data?.momo_code && tripFrom) {
           const r2 = await supabase.from("branches").select("momo_code").ilike("name", tripFrom).limit(1).maybeSingle();
           data = r2.data || null;
         }
