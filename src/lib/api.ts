@@ -172,8 +172,37 @@ export async function fetchTrip(id: string): Promise<Trip | null> {
   return fetchTripById(id);
 }
 
-// Fetch trips specifically by date (Used by Agency Dashboard)
-export async function fetchTripsByDate(date?: string): Promise<Trip[]> {
+// Fetch trips specifically by date, scoped to a branch FK when provided.
+// When branchId is set, the query is branch-isolated at the DB level (no text fallback).
+export async function fetchTripsByDate(date?: string, branchId?: string): Promise<Trip[]> {
+  if (branchId) {
+    try {
+      const { data, error } = await supabase
+        .from("trips")
+        .select(`id, route_from, route_to, departure_time, arrival_time, duration, travel_date, date, price, currency, total_seats, available_seats, bus_type, amenities, plate_number, status, origin_branch, origin_branch_id, branch_id, operator_id, operator:operators(id, name, emoji)`)
+        .eq("travel_date", date || new Date().toISOString().split("T")[0])
+        .or(`origin_branch_id.eq.${branchId},branch_id.eq.${branchId}`)
+        .order("travel_date", { ascending: true })
+        .limit(200);
+      if (!error && data) {
+        return data.map((t: any) => {
+          const op = t.operator;
+          return {
+            id: t.id,
+            operator: { id: op?.id || t.operator_id || "unknown", name: op?.name || "Bus Operator", logo: op?.logo || "🚌", gradient: op?.gradient || "linear-gradient(135deg, #FF6B1A, #FF8800)", emoji: op?.emoji || op?.logo || "🚌", rating: 4.8, totalReviews: 120 },
+            from: t.route_from || t.from || "Kigali", to: t.route_to || t.to || "Musanze",
+            departureTime: t.departure_time || "08:00", arrivalTime: t.arrival_time || "10:00",
+            duration: t.duration || "2h 00m", price: t.price || 2500, currency: t.currency || "RWF",
+            availableSeats: t.available_seats ?? 36, totalSeats: t.total_seats ?? 36,
+            busType: t.bus_type || "Coaster", amenities: t.amenities || ["WiFi", "AC"],
+            date: t.travel_date || t.date || new Date().toISOString().split("T")[0],
+            plateNumber: t.plate_number || "RAD100B", status: t.status || "scheduled",
+            origin_branch_id: t.origin_branch_id, branch_id: t.branch_id,
+          } as any;
+        });
+      }
+    } catch {}
+  }
   return fetchTrips(undefined, undefined, date);
 }
 

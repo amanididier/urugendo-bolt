@@ -109,34 +109,54 @@ export default function AgentProfilePage() {
         resolvedBranch = storedBranch;
       }
 
-      const currentBranch = resolvedBranch || branchName || "Musanze";
-
-      // Fetch live branch MoMo code AND contact phone matching agent's current station
+      let resolvedBranchId: string | null = null;
+      let resolvedAgency: string | null = storedAgency || agencyName || null;
       try {
-        const { data: bData } = await supabase
-          .from("branches")
-          .select("momo_code, phone")
-          .ilike("name", `%${currentBranch}%`)
-          .maybeSingle();
+        const email = localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email");
+        if (email) {
+          const { data: ar } = await supabase.from("agency_agents").select("branch_id,agency_name").eq("email", email).maybeSingle();
+          if ((ar as any)?.branch_id) resolvedBranchId = (ar as any).branch_id;
+          if ((ar as any)?.agency_name) resolvedAgency = (ar as any).agency_name;
+        }
+      } catch {}
 
+      // Fetch live branch MoMo code AND contact phone — branch_id is authoritative (name alone leaks across agencies)
+      const currentBranch = resolvedBranch || branchName || "Musanze";
+      let branchResolved = false;
+      try {
+        let bData: any = null;
+        if (resolvedBranchId) {
+          const { data } = await supabase.from("branches").select("momo_code, phone").eq("id", resolvedBranchId).maybeSingle();
+          bData = data || null;
+        }
+        if (!bData && resolvedAgency) {
+          const { data } = await supabase.from("branches").select("momo_code, phone").eq("agency_name", resolvedAgency).ilike("name", currentBranch).maybeSingle();
+          bData = data || null;
+        }
+        if (!bData) {
+          const { data } = await supabase.from("branches").select("momo_code, phone").ilike("name", `%${currentBranch}%`).maybeSingle();
+          bData = data || null;
+        }
         if (bData?.momo_code) {
           setMomoCode(bData.momo_code);
           localStorage.setItem("urugendo_branch_momo", bData.momo_code);
+          branchResolved = true;
+        } else if (bData && !bData.momo_code) {
+          setMomoCode("");
+          branchResolved = true;
         }
-        // Batch 3: load real branch phone from the branches record.
-        if (bData?.phone) {
-          setBranchPhone(bData.phone);
-        }
+        if (bData?.phone) setBranchPhone(bData.phone);
       } catch {
         // Fall back to localized memory
       }
 
-      const storedMomo =
-        localStorage.getItem(`momo_code_${currentBranch.toLowerCase()}`) ||
-        localStorage.getItem("urugendo_branch_momo") ||
-        localStorage.getItem("urugendo_momo_code");
-
-      if (storedMomo) setMomoCode(storedMomo);
+      if (!branchResolved) {
+        const storedMomo =
+          localStorage.getItem(`momo_code_${currentBranch.toLowerCase()}`) ||
+          localStorage.getItem("urugendo_branch_momo") ||
+          localStorage.getItem("urugendo_momo_code");
+        if (storedMomo && /^\d{6,7}$/.test(storedMomo)) setMomoCode(storedMomo);
+      }
     }
 
     loadAgentDetails();
@@ -228,7 +248,7 @@ export default function AgentProfilePage() {
                 Branch MoMo Code
               </span>
               <span className="text-[18px] font-extrabold text-slate-900 font-mono tracking-wide">
-                *{momoCode}#
+                {momoCode ? `*${momoCode}#` : "— Not yet set"}
               </span>
             </div>
           </div>

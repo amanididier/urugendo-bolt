@@ -343,7 +343,7 @@ export default function AgencyDashboard() {
         const todayStr = new Date().toISOString().split("T")[0];
         const [todayTrips, branchRevenue, branchBookingsRaw] =
           await Promise.all([
-            fetchTripsByDate(todayStr),
+            fetchTripsByDate(todayStr, resolvedBranchId || undefined),
             resolvedBranchId
               ? fetchBranchRevenue(resolvedBranchId, "today")
               : Promise.resolve({ passengers: 0, revenue: 0 }),
@@ -457,16 +457,13 @@ export default function AgencyDashboard() {
             : false;
           if (payload.eventType === "INSERT" && matches) {
             // Trigger a light reload of trips (keeps operator join correct) — cheap, no bookings reload
-            fetchTripsByDate(new Date().toISOString().split("T")[0]).then(
+            fetchTripsByDate(new Date().toISOString().split("T")[0], agentBranchId).then(
               (all) => {
                 setTrips((prev) => {
                   const filtered = all.filter(
                     (t: any) =>
                       t.origin_branch_id === agentBranchId ||
-                      t.branch_id === agentBranchId ||
-                      cleanStationName(t.from || "").includes(
-                        cleanStationName(agentBranch),
-                      ),
+                      t.branch_id === agentBranchId,
                   );
                   // merge by id to avoid duplicates
                   const byId = new Map(prev.map((t) => [t.id, t]));

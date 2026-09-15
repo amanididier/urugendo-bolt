@@ -67,7 +67,7 @@ export default function SearchPage() {
 
         const { data: rawDbTrips, error: dbError } = await supabase
           .from("trips")
-          .select("*");
+          .select("*, operator:operators(id,name,emoji,gradient)");
 
         if (!cancelled && !dbError && rawDbTrips && rawDbTrips.length > 0) {
           const matchedDbTrips = rawDbTrips.filter((t: any) => {
@@ -102,7 +102,7 @@ export default function SearchPage() {
                 availableSeats: t.available_seats ?? t.total_seats ?? 29,
                 totalSeats: t.total_seats ?? 29,
                 plateNumber: t.plate_number || t.plateNumber,
-                operator: t.operator || "Bus Operator",
+                operator: t.operator ? { id: t.operator.id, name: t.operator.name, emoji: t.operator.emoji, gradient: t.operator.gradient } : { id: "unknown", name: "Bus Operator", emoji: "🚌" },
                 amenities: t.amenities || ["⚡", "📶"],
                 duration: t.duration || "2h 30m",
                 terminalFrom: t.route_from || t.from,

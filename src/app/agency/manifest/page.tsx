@@ -16,7 +16,8 @@ import {
   Armchair,
   FileSpreadsheet,
 } from "lucide-react";
-import { fetchTripsByDate, fetchAllBookings } from "@/lib/api";
+import { fetchTripsByDate } from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 import type { AgencyBranch, Trip } from "@/lib/types";
 
 interface ManifestTrip {
@@ -74,13 +75,23 @@ export default function AgencyManifestPage() {
 
     async function loadData() {
       try {
+        const em = localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email");
+        let branchId: string | null = null;
+        if (em) {
+          const { data: ar } = await supabase.from("agency_agents").select("branch_id").eq("email", em).maybeSingle();
+          branchId = (ar as any)?.branch_id || null;
+        }
         const todayStr = new Date().toISOString().split("T")[0];
-        const [todayTrips, allBookings] = await Promise.all([
-          fetchTripsByDate(todayStr),
-          fetchAllBookings(),
-        ]);
+        const todayTrips = await fetchTripsByDate(todayStr, branchId || undefined);
+        // Trips are already branch-scoped; derive relevant bookings from their ids (no cross-branch leakage)
+        const tripIds = new Set((todayTrips || []).map((t: any) => t.id));
+        let filteredBookings: any[] = [];
+        if (branchId) {
+          const { data } = await supabase.from("bookings").select("id,trip_id,status,branch_id").eq("branch_id", branchId);
+          filteredBookings = (data || []).filter((b: any) => tripIds.has(b.trip_id));
+        }
         setTrips(todayTrips || []);
-        setBookings(allBookings || []);
+        setBookings(filteredBookings || []);
       } catch (error) {
         console.error("Failed to fetch manifest data:", error);
       }

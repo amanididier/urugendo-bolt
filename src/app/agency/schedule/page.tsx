@@ -190,16 +190,9 @@ function AgencyScheduleContent() {
     })();
   }, []);
 
-  // Branch isolation: trips filtered by origin_branch_id when available, fallback to name match
+  // Strict branch isolation: branch_id must match (no name fallback — that leaked Fasta↔Virunga)
   const loadTrips = useCallback(async () => {
     setLoading(true);
-    const todayStr = new Date().toISOString().split("T")[0];
-    const [tripData, bookingData] = await Promise.all([
-      fetchTripsByDate(todayStr),
-      fetchAllBookings(),
-    ]);
-
-    // Resolve current agent branch_id first (authoritative)
     let currentBranchId: string | null = null;
     try {
       const em = localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email");
@@ -208,12 +201,16 @@ function AgencyScheduleContent() {
         if ((ar as any)?.branch_id) currentBranchId = (ar as any).branch_id;
       }
     } catch {}
+    const todayStr = new Date().toISOString().split("T")[0];
+    const [tripData, bookingData] = await Promise.all([
+      fetchTripsByDate(todayStr, currentBranchId || undefined),
+      currentBranchId ? fetchAllBookings().then((all) => all.filter((b: any) => (b.branchId || (b as any).branch_id) === currentBranchId)) : Promise.resolve([] as any),
+    ]);
 
     let branchTrips: Trip[];
     if (currentBranchId) {
       branchTrips = (tripData || []).filter((t: any) => t.origin_branch_id === currentBranchId || t.branch_id === currentBranchId);
     } else {
-      // No branch_id on this agent — fail closed rather than text-match across agencies (was leaking Virunga into Fasta)
       branchTrips = [];
     }
 
