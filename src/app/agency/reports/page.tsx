@@ -280,10 +280,10 @@ export default function AgencyReportsPage() {
     const branchStr = getBranchName(selectedBranch);
     const text =
       reportType === "urugendo"
-        ? `*Virunga Express - Urugendo Digital Report*\n\nPeriod: ${selectedDate} (${filterPeriod})\nDigital Tickets Issued: ${
+        ? `*Bus Operator - Urugendo Digital Report*\n\nPeriod: ${selectedDate} (${filterPeriod})\nDigital Tickets Issued: ${
             filteredBookings.length
           }\nTotal Digital Revenue: ${urugendoRevenue.toLocaleString()} RWF\n\nAll-Time Digital: ${totalBookingsAllTime} tickets (${totalRevenueAllTime.toLocaleString()} RWF)`
-        : `*Virunga Express - Station Manifest Report*\n\nStation Branch: ${branchStr}\nDate: ${selectedDate}\nTotal Buses Manifested: ${filteredManifest.length}\nTotal Urugendo Onboard: ${filteredManifest.reduce(
+        : `*Bus Operator - Station Manifest Report*\n\nStation Branch: ${branchStr}\nDate: ${selectedDate}\nTotal Buses Manifested: ${filteredManifest.length}\nTotal Urugendo Onboard: ${filteredManifest.reduce(
             (acc, m) => acc + m.urugendoPassengers,
             0,
           )}`;

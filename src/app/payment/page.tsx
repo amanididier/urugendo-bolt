@@ -99,22 +99,25 @@ export default function PaymentPage() {
     if (storedBranchMomo && /^\d{6,7}$/.test(storedBranchMomo)) {
       setBranchMomoCode(storedBranchMomo);
     }
-    // Then resolve from branches table via the trip's origin (from city)
+    // Prefer the trip's origin_branch_id (FK-authoritative, never cross-agency).
+    // Fall back to name match only if the trip has no FK (legacy rows).
+    const tripBranchId = (selectedTrip as any)?.origin_branch_id || (selectedTrip as any)?.branch_id || null;
     const tripFrom = (selectedTrip as any)?.from || (selectedTrip as any)?.route_from || search?.from;
-    if (!tripFrom) return;
     (async () => {
       try {
-        const { data } = await supabase
-          .from("branches")
-          .select("momo_code")
-          .ilike("name", tripFrom)
-          .limit(1)
-          .maybeSingle();
+        let data: any = null;
+        if (tripBranchId) {
+          const r = await supabase.from("branches").select("momo_code").eq("id", tripBranchId).maybeSingle();
+          data = r.data || null;
+        }
+        if (!data && tripFrom) {
+          const r2 = await supabase.from("branches").select("momo_code").ilike("name", tripFrom).limit(1).maybeSingle();
+          data = r2.data || null;
+        }
         if (data?.momo_code && /^\d{6,7}$/.test(data.momo_code)) {
           setBranchMomoCode(data.momo_code);
           localStorage.setItem("urugendo_branch_momo", data.momo_code);
         } else if (data && !data.momo_code) {
-          // Explicitly NULL — manager hasn't set MoMo for this branch yet
           setBranchMomoCode(null);
         }
       } catch {}
@@ -219,15 +222,16 @@ export default function PaymentPage() {
         }, 1500);
         return;
       }
-      const dbBookingId = dbResult.id;
-      await decrementAvailableSeats(selectedTrip.id);
-
-      // Flip the booking's payment_status to 'submitted' so the agent's
-      // "Verify" tab picks it up. Idempotent — safe if status is already
-      // 'pending' from createBooking.
-      if (dbBookingId) {
-        await markPaymentSubmitted(dbBookingId);
+      if (!dbResult.id) {
+        console.error("[payment] createBooking returned no id:", dbResult.error || "unknown DB error");
+        setState("failed");
+        setError(dbResult.error ? `Booking failed: ${dbResult.error}` : "Booking failed — please try again.");
+        return;
       }
+      const dbBookingId = dbResult.id;
+      // createBooking already sets payment_status='submitted'; extra call is redundant but safe to keep.
+      await markPaymentSubmitted(dbBookingId);
+      try { await decrementAvailableSeats(selectedTrip.id); } catch {}
 
       setReferenceId(shortCode);
       setState("success");

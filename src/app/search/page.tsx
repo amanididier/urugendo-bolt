@@ -102,7 +102,7 @@ export default function SearchPage() {
                 availableSeats: t.available_seats ?? t.total_seats ?? 29,
                 totalSeats: t.total_seats ?? 29,
                 plateNumber: t.plate_number || t.plateNumber,
-                operator: t.operator || "Virunga Express",
+                operator: t.operator || "Bus Operator",
                 amenities: t.amenities || ["⚡", "📶"],
                 duration: t.duration || "2h 30m",
                 terminalFrom: t.route_from || t.from,
@@ -285,7 +285,7 @@ export default function SearchPage() {
               operatorObj?.name ||
               (typeof trip.operator === "string"
                 ? trip.operator
-                : "Virunga Express");
+                : "Bus Operator");
             const operatorGradient = operatorObj?.gradient;
 
             const fromStation = trip.terminalFrom || trip.from || search.from;

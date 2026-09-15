@@ -78,11 +78,8 @@ export function LoginPopup({ onClose }: LoginPopupProps) {
 
       if (data && data.length > 0) {
         setOperators(data);
-        if (!managerAgency) {
-          const virunga = data.find((op) =>
-            op.name.toLowerCase().includes("virunga"),
-          );
-          setManagerAgency(virunga ? virunga.name : data[0].name);
+        if (!managerAgency && !localStorage.getItem("urugendo_agency")) {
+          setManagerAgency(data[0].name);
         }
       }
     }
@@ -305,10 +302,7 @@ export function LoginPopup({ onClose }: LoginPopupProps) {
 
                   {agencyDropdownOpen && (
                     <div className="absolute z-50 mt-1 w-full bg-white border border-border rounded-xl shadow-lg max-h-40 overflow-y-auto divide-y divide-border/50">
-                      {(operators.length > 0
-                        ? operators
-                        : [{ id: "1", name: "Virunga Express" }]
-                      ).map((op) => (
+                      {(operators.length > 0 ? operators : []).map((op) => (
                         <button
                           key={op.id}
                           type="button"

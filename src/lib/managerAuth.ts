@@ -244,7 +244,7 @@ export async function updateManagerPassword(
     .from("agency_managers")
     .select("password_hash, password_salt, password_iter")
     .eq("id", managerId)
-    .single();
+    .maybeSingle();
 
   if (error || !data) {
     return { ok: false, message: "Manager account record not found." };

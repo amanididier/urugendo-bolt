@@ -533,7 +533,7 @@ export default function AgencyManagerApp() {
       agentEmail: `${newBranchNameInput
         .toLowerCase()
         .replace(/\s+/g, "")
-        .trim()}@virunga.rw`,
+        .trim()}@${(agencyForInsert || "agency").toLowerCase().replace(/\s+/g, "")}.rw`,
       stats: {
         today: { passengers: 0, revenue: 0 },
         monthly: { passengers: 0, revenue: 0 },

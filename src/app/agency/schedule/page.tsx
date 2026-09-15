@@ -222,7 +222,7 @@ function AgencyScheduleContent() {
         .from("trips")
         .select("*")
         .eq("id", selectedTripId)
-        .single()
+        .maybeSingle()
         .then(({ data }) => {
           if (data) setSpecificTrip(data as Trip);
         });
@@ -488,7 +488,7 @@ function AgencyScheduleContent() {
           </motion.button>
         </div>
         <div className="flex items-center gap-2 text-white/80 text-[12px] font-semibold mb-1">
-          <Building size={14} /> Virunga Express • {agentBranch} Branch
+          <Building size={14} /> Bus Operator • {agentBranch} Branch
         </div>
         <h1 className="text-[22px] font-extrabold text-white tracking-tight">
           {activeTrip

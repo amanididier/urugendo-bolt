@@ -587,7 +587,7 @@ function TicketCard({
   const operatorName =
     typeof booking.trip?.operator === "object" && booking.trip.operator !== null
       ? booking.trip.operator.name
-      : (booking.trip?.operator as string) || "Virunga Express";
+      : (booking.trip?.operator as string) || "Bus Operator";
 
   return (
     <motion.button

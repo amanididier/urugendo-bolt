@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -242,7 +242,7 @@ export default function AgencyDashboard() {
           .from("agency_agents")
           .select("status, branch_name, id, branch_id")
           .eq("email", storedAgentEmail)
-          .single();
+          .maybeSingle();
 
         if (!error && data) {
           setAgentStatus(data.status);
@@ -303,10 +303,16 @@ export default function AgencyDashboard() {
   // Batch 4: every 5 minutes while the agent has pending MoMo bookings in
   // their branch, send a reminder notification. The interval is set up once
   // on mount and torn down on unmount; no per-tick re-query to Supabase.
+  const bookingsRef = useRef(bookings);
+  useEffect(() => {
+    bookingsRef.current = bookings;
+  }, [bookings]);
+
   useEffect(() => {
     const FIVE_MIN_MS = 5 * 60 * 1000;
     const interval = setInterval(async () => {
-      const pending = bookings.filter(
+      const currentBookings = bookingsRef.current || [];
+      const pending = currentBookings.filter(
         (b) => b.status === "pending" || b.status === "payment_submitted",
       );
       if (pending.length === 0) return;
@@ -321,8 +327,7 @@ export default function AgencyDashboard() {
       });
     }, FIVE_MIN_MS);
     return () => clearInterval(interval);
-  }, [bookings, agentBranch]);
-
+  }, [agentBranch]);
   useEffect(() => {
     let isMounted = true;
 
@@ -419,6 +424,23 @@ export default function AgencyDashboard() {
         (payload: any) => {
           const row = payload.new;
           if (!row) return;
+          // ---> ADD THIS NATIVE NOTIFICATION TRIGGER <---
+          if (
+            payload.eventType === "INSERT" &&
+            (row.status === "pending" || row.status === "payment_submitted")
+          ) {
+            if (
+              typeof window !== "undefined" &&
+              "Notification" in window &&
+              Notification.permission === "granted"
+            ) {
+              new Notification("New Payment Submitted! 📱", {
+                body: `A new booking requires verification. Tap to review.`,
+                icon: "/icon-192.png",
+              });
+            }
+          }
+          // ----------------------------------------------
           // Map row -> ExtendedBooking shape (light), merge into list
           const mapped: any = {
             id: row.id,
@@ -540,11 +562,12 @@ export default function AgencyDashboard() {
   };
 
   // Threshold-based batching: notify agent at 5 pending, or at 5min if 1-4 still pending (no spam per-tx)
-  const batchNotifRef = React.useRef<{
+  const batchNotifRef = useRef<{
     lastCount: number;
     timer: ReturnType<typeof setTimeout> | null;
     lastBatchAt: number;
   }>({ lastCount: 0, timer: null, lastBatchAt: 0 });
+
   useEffect(() => {
     const pending = bookings.filter(
       (b) =>
@@ -552,10 +575,12 @@ export default function AgencyDashboard() {
         b.status === "payment_submitted" ||
         (b as any).payment_status === "submitted",
     ).length;
+
     const ref = batchNotifRef.current;
+
+    // Trigger immediate batch alert if we cross into 5+ pending from a lower number
     if (pending >= 5 && ref.lastCount < 5) {
-      // hit threshold 5 — immediate batch alert
-      ref.lastCount = pending;
+      ref.lastCount = 5; // Lock it to 5 so it cleanly resets only when it drops below 5
       ref.lastBatchAt = Date.now();
       if (ref.timer) {
         clearTimeout(ref.timer);
@@ -565,7 +590,6 @@ export default function AgencyDashboard() {
         const uid = data?.user?.id;
         if (!uid) return;
         const { supabase: sb } = await import("@/lib/supabase");
-        // also bump bell via notifications row so badge reflects
         await sb.from("notifications").insert({
           user_id: uid,
           title: "MoMo queue — 5 pending",
@@ -575,8 +599,12 @@ export default function AgencyDashboard() {
       });
       return;
     }
+
+    // Handle 1 to 4 pending items with a 5-minute debounce timer
     if (pending > 0 && pending < 5) {
+      ref.lastCount = pending;
       if (ref.timer) clearTimeout(ref.timer);
+
       ref.timer = setTimeout(
         () => {
           if (Date.now() - ref.lastBatchAt < 4 * 60 * 1000) return;
@@ -595,7 +623,7 @@ export default function AgencyDashboard() {
         },
         5 * 60 * 1000,
       );
-      ref.lastCount = pending;
+
       return () => {
         if (ref.timer) {
           clearTimeout(ref.timer);
@@ -603,6 +631,8 @@ export default function AgencyDashboard() {
         }
       };
     }
+
+    // Reset completely if there are no pending bookings
     if (pending === 0) {
       if (ref.timer) {
         clearTimeout(ref.timer);

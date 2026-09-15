@@ -66,7 +66,7 @@ export default function AgentProfilePage() {
           .from("profiles")
           .select("full_name, branch, operator_id, momo_code")
           .eq("id", user.id)
-          .single();
+          .maybeSingle();
 
         if (profile) {
           if (profile.full_name) setAgentName(profile.full_name);
@@ -81,7 +81,7 @@ export default function AgentProfilePage() {
               .from("operators")
               .select("name")
               .eq("id", profile.operator_id)
-              .single();
+              .maybeSingle();
             if (op?.name) setAgencyName(op.name);
           }
         }
@@ -117,7 +117,7 @@ export default function AgentProfilePage() {
           .from("branches")
           .select("momo_code, phone")
           .ilike("name", `%${currentBranch}%`)
-          .single();
+          .maybeSingle();
 
         if (bData?.momo_code) {
           setMomoCode(bData.momo_code);

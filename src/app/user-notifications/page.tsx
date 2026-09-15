@@ -14,37 +14,62 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/context/app-context";
-import { t } from "@/lib/translations";
-
-const initialSampleUserNotifications: { id: string; title: string; message: string; type: "security" | "booking"; read: boolean; createdAt: string }[] = [];
 
 export default function NotificationsPage() {
   const router = useRouter();
   const { language } = useApp();
-  const [notifications, setNotifications] = useState(
-    initialSampleUserNotifications,
-  );
+  const [notifications, setNotifications] = useState<
+    {
+      id: string;
+      title: string;
+      message: string;
+      type: any;
+      read: boolean;
+      createdAt: string;
+    }[]
+  >([]);
   const [filter, setFilter] = useState<"all" | "unread">("all");
 
   useEffect(() => {
     try {
       const stored = localStorage.getItem("urugendo_user_notifications");
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setNotifications((prev) => {
-            const existingIds = new Set(prev.map((p) => p.id));
-            const uniqueNew = parsed.filter(
-              (item: { id: string }) => !existingIds.has(item.id),
-            );
-            return [...uniqueNew, ...prev];
-          });
-        }
+      let parsed = stored ? JSON.parse(stored) : [];
+
+      if (!Array.isArray(parsed)) {
+        parsed = [];
       }
+
+      // Check if a welcome notification has ever been issued to this user
+      const hasWelcomed = localStorage.getItem("urugendo_welcomed");
+      if (!hasWelcomed) {
+        const welcomeNotif = {
+          id: `welcome-${Date.now()}`,
+          title:
+            language === "RW"
+              ? "Murakaza neza kuri Urugendo! 🎉"
+              : "Welcome to Urugendo! 🎉",
+          message:
+            language === "RW"
+              ? "Twishimiye ko utugeraho. Koresha ubu buryo bwo gutwara abantu kugira ngo ugende neza kandi vuba."
+              : "We're thrilled to have you on board. Book bus tickets seamlessly, track your trips in real time, and enjoy safe travels.",
+          type: "system" as const,
+          read: false,
+          createdAt: new Date().toISOString(),
+        };
+
+        parsed = [welcomeNotif, ...parsed];
+        localStorage.setItem("urugendo_welcomed", "true");
+        localStorage.setItem(
+          "urugendo_user_notifications",
+          JSON.stringify(parsed),
+        );
+      }
+
+      setNotifications(parsed);
     } catch {
       // ignore
     }
-  }, []);
+  }, [language]);
 
   const filtered =
     filter === "unread" ? notifications.filter((n) => !n.read) : notifications;

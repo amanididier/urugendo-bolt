@@ -81,8 +81,8 @@ export async function fetchTrips(
       return {
         id: t.id,
         operator: {
-          id: op?.id || t.operator_id || "virunga",
-          name: op?.name || "Virunga Express",
+          id: op?.id || t.operator_id || "unknown",
+          name: op?.name || "Bus Operator",
           logo: op?.logo || "🚌",
           gradient: op?.gradient || "linear-gradient(135deg, #FF6B1A, #FF8800)",
           emoji: op?.emoji || op?.logo || "🚌",
@@ -126,10 +126,10 @@ export async function fetchTripById(id: string): Promise<Trip | null> {
       `,
       )
       .eq("id", id)
-      .single();
+      .maybeSingle();
 
     if (error || !data) {
-      console.error("Error fetching trip by ID:", error?.message || error);
+      if (error) console.error("Error fetching trip by ID:", error?.message || error);
       return null;
     }
 
@@ -137,8 +137,8 @@ export async function fetchTripById(id: string): Promise<Trip | null> {
     return {
       id: data.id,
       operator: {
-        id: op?.id || data.operator_id || "virunga",
-        name: op?.name || "Virunga Express",
+        id: op?.id || data.operator_id || "unknown",
+        name: op?.name || "Bus Operator",
         logo: op?.logo || "🚌",
         gradient: op?.gradient || "linear-gradient(135deg, #FF6B1A, #FF8800)",
         emoji: op?.emoji || op?.logo || "🚌",
@@ -215,12 +215,36 @@ export async function createTrip(
         : undefined;
 
     if (!operatorId) {
-      const { data: ops } = await supabase
-        .from("operators")
-        .select("id")
-        .limit(1);
-      if (ops && ops.length > 0) {
-        operatorId = ops[0].id;
+      // No leaked default: resolve via the logged-in agent's branch → branch.agency_name → operators.name,
+      // so a Fasta agent never schedules under Virunga.
+      let resolvedFromAgent = false;
+      try {
+        const em = typeof window !== "undefined" ? (localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email")) : null;
+        if (em) {
+          const { data: ar } = await supabase.from("agency_agents").select("branch_id").eq("email", em).maybeSingle();
+          const bid = (ar as any)?.branch_id || null;
+          if (bid) {
+            const { data: br } = await supabase.from("branches").select("agency_name").eq("id", bid).maybeSingle();
+            const agency = (br as any)?.agency_name?.trim();
+            if (agency) {
+              const { data: op } = await supabase.from("operators").select("id").ilike("name", agency).maybeSingle();
+              if ((op as any)?.id) { operatorId = (op as any).id as string; resolvedFromAgent = true; }
+              else {
+                // operator row missing — create would 400 otherwise; keep null and let insert fail loudly
+                operatorId = undefined;
+                resolvedFromAgent = true;
+              }
+            }
+          }
+        }
+      } catch {}
+      if (!resolvedFromAgent) {
+        // No agent session — caller should supply operator; do NOT fall back to arbitrary first row.
+        operatorId = undefined;
+      }
+      if (!operatorId) {
+        console.error("[api] createTrip: cannot resolve operator_id — Fasta/Virunga leak guard fired. Supply tripData.operator or log in as agent.");
+        return null;
       }
     }
 
@@ -273,7 +297,7 @@ export async function createTrip(
       .from("trips")
       .insert([payload])
       .select(`*, operator:operators(*)`)
-      .single();
+      .maybeSingle();
 
     if (error || !data) {
       console.error("Error creating trip:", error?.message || error);
@@ -284,8 +308,8 @@ export async function createTrip(
     return {
       id: data.id,
       operator: {
-        id: op?.id || data.operator_id || "virunga",
-        name: op?.name || "Virunga Express",
+        id: op?.id || data.operator_id || "unknown",
+        name: op?.name || "Bus Operator",
         logo: op?.logo || "🚌",
         gradient: op?.gradient || "linear-gradient(135deg, #FF6B1A, #FF8800)",
         emoji: op?.emoji || op?.logo || "🚌",
@@ -347,23 +371,19 @@ export async function createBooking(bookingData: {
     const resolvedStatus =
       bookingData.status === "upcoming" ? "active" : bookingData.status;
 
-    // Branch isolation: tie booking to its origin branch so it appears
-    // on the correct station agent's Verify tab (fixes "0 pending MoMo").
-    // Look up branch_id from agency_agents → agency_agents.branch_id → branches.id
+    // Branch isolation: a *passenger* booking must land on the selling branch,
+    // which is the trip's origin branch (FK-authoritative), not the passenger's own agency_agents row.
+    // Using the passenger's agency_agents row would mis-route bookings when a user has never been an agent.
     let resolvedBranchId: string | null = null;
     try {
-      const authEmail = (authData.user.email || "").trim().toLowerCase();
-      const authPhone = (authData.user as any)?.phone || (authData.user.user_metadata as any)?.phone || null;
-      let agentRow: any = null;
-      const { fetchAgentByAuth } = await import("@/lib/agencyAgentService");
-      agentRow = await fetchAgentByAuth({ email: authEmail, phone: authPhone });
-      if ((agentRow as any)?.branch_id) resolvedBranchId = (agentRow as any).branch_id;
-      if (!resolvedBranchId && authEmail) {
-        const { data } = await supabase.from("agency_agents").select("branch_id").eq("email", authEmail).maybeSingle();
-        if ((data as any)?.branch_id) resolvedBranchId = (data as any).branch_id;
+      const tid = (bookingData.trip as any)?.id;
+      if (tid) {
+        const { data: trow } = await supabase.from("trips").select("origin_branch_id, branch_id").eq("id", tid).maybeSingle();
+        const anyRow = trow as any;
+        if (anyRow?.origin_branch_id) resolvedBranchId = anyRow.origin_branch_id;
+        else if (anyRow?.branch_id) resolvedBranchId = anyRow.branch_id;
       }
     } catch {}
-    // Fallback: origin station from trip (most common: trips created at origin branch)
     if (!resolvedBranchId) {
       try {
         const originName = (bookingData.trip as any)?.from || (bookingData.trip as any)?.route_from;
@@ -408,7 +428,7 @@ export async function createBooking(bookingData: {
         },
       ])
       .select("id")
-      .single();
+      .maybeSingle();
 
     if (error || !data) {
       console.error("Error creating booking in DB:", error?.message || error);
@@ -444,7 +464,7 @@ export async function decrementAvailableSeats(
       .from("trips")
       .select("available_seats")
       .eq("id", tripId)
-      .single();
+      .maybeSingle();
 
     if (fetchError || !trip) return false;
 
@@ -706,8 +726,8 @@ function formatBookingData(b: any): Booking {
     trip: {
       id: b.trip?.id || "trip-1",
       operator: {
-        id: b.trip?.operator?.id || "virunga",
-        name: b.trip?.operator?.name || "Virunga Express",
+        id: b.trip?.operator?.id || "unknown",
+        name: b.trip?.operator?.name || "Bus Operator",
         logo: b.trip?.operator?.logo || "🚌",
         gradient:
           b.trip?.operator?.gradient ||

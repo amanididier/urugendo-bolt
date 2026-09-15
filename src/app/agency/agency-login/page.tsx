@@ -167,7 +167,7 @@ function LoginContent() {
           .from("profiles")
           .select("status")
           .eq("email", registeredAgentEmail)
-          .single();
+          .maybeSingle();
 
         if (profile && profile.status === "approved") {
           setIsWaitingApproval(false);
@@ -473,7 +473,7 @@ function LoginContent() {
         .from("profiles")
         .select("status, role, full_name")
         .eq("id", authData.user.id)
-        .single();
+        .maybeSingle();
 
       // Approval gate: look up by email/phone (real agency_agents columns),
       // never by `id = auth.users.id` or `user_id` — those 400 on this table.

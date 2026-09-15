@@ -43,7 +43,7 @@ export async function notifyUser(input: NotificationInput): Promise<string | nul
         action_url: input.actionUrl || null,
       })
       .select("id")
-      .single();
+      .maybeSingle();
 
     if (error || !data) {
       console.warn("[notificationsService] insert failed:", error?.message);

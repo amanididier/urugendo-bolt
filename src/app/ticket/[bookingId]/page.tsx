@@ -241,7 +241,7 @@ export default function TicketDetailPage() {
   const cleanPhone = dynamicBranchPhone.replace(/\D/g, "");
   const openWhatsApp = () => {
     const message = encodeURIComponent(
-      `Hello Virunga Express, I am inquiring about my booking ID: ${
+      `Hello ${operatorName}, I am inquiring about my booking ID: ${
         booking?.shortCode || bookingId
       }.`,
     );
@@ -303,7 +303,7 @@ export default function TicketDetailPage() {
 
   const handleShare = async () => {
     const shareData = {
-      title: `Bus Ticket - ${booking?.shortCode || "Virunga Express"}`,
+      title: `Bus Ticket - ${booking?.shortCode || operatorName}`,
       text: `My ticket from ${getCityName(booking?.trip?.from)} to ${getCityName(
         booking?.trip?.to,
       )}. Code: ${booking?.shortCode}`,
@@ -362,7 +362,7 @@ export default function TicketDetailPage() {
   const operatorName =
     typeof booking.trip?.operator === "object" && booking.trip.operator !== null
       ? booking.trip.operator.name
-      : (booking.trip?.operator as string) || "Virunga Express";
+      : (booking.trip?.operator as string) || "Bus Operator";
   const branchName = getCityName(booking.trip?.from, "Musanze Terminal");
   const plateNumber = booking.trip?.plateNumber || "RAD 100B";
   const busType = booking.trip?.busType || "Coaster Express";

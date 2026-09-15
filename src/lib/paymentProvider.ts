@@ -198,7 +198,7 @@ export async function markPaymentSubmitted(
       })
       .eq("id", bookingId)
       .select("id")
-      .single();
+      .maybeSingle();
 
     if (error || !data) {
       console.warn(
