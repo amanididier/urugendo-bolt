@@ -536,12 +536,6 @@ export async function fetchBookingsByBranch(
   branchId: string,
 ): Promise<Booking[]> {
   try {
-    let branchName: string | null = null;
-    try {
-      const { data: br } = await supabase.from("branches").select("name").eq("id", branchId).maybeSingle();
-      if ((br as any)?.name) branchName = (br as any).name;
-    } catch {}
-
     const { data, error } = await supabase
       .from("bookings")
       .select(
@@ -552,7 +546,7 @@ export async function fetchBookingsByBranch(
         trip:trips(id, route_from, route_to, departure_time, arrival_time, travel_date, price, operator:operators(id, name))
       `,
       )
-      .or(branchName ? `branch_id.eq.${branchId},agency_branch.ilike.${branchName}` : `branch_id.eq.${branchId}`)
+      .eq("branch_id", branchId)
       .order("created_at", { ascending: false })
       .limit(400);
 

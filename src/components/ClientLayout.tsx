@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { BottomNav } from "@/components/BottomNav";
 import { CityPicker } from "@/components/CityPicker";
 import { RouteProgressBar } from "@/components/RouteProgressBar";
+import { NotificationToast } from "@/components/NotificationToast";
 
 interface ClientLayoutProps {
   children: React.ReactNode;
@@ -51,6 +52,7 @@ export function ClientLayout({ children }: ClientLayoutProps) {
         {/* Global Passenger Nav & City Picker */}
         <BottomNav />
         <CityPicker />
+        <NotificationToast />
       </div>
     </div>
   );

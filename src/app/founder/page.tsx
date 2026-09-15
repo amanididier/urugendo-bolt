@@ -1,17 +1,19 @@
 "use client";
 
-import { Building2, Users, Bus, Ticket, TrendingUp, UserCheck, MapPin, ShieldCheck, BarChart3 } from "lucide-react";
+import { Building2, Users, Bus, Ticket, TrendingUp, UserCheck, MapPin, ShieldCheck, BarChart3, ArrowUpRight, Sparkles } from "lucide-react";
 import { useFounderData } from "./FounderContext";
 import { useState, useEffect } from "react";
 import { X, Bell } from "lucide-react";
 
-function StatCard({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string | number; sub?: string }) {
+function StatCard({ icon, label, value, sub, accent }: { icon: React.ReactNode; label: string; value: string | number; sub?: string; accent?: boolean }) {
   return (
-    <div className="bg-white rounded-2xl border border-border p-4">
-      <div className="w-9 h-9 rounded-xl bg-primary-light text-primary flex items-center justify-center mb-2">{icon}</div>
-      <div className="text-[11px] font-bold tracking-widest uppercase text-text-muted">{label}</div>
-      <div className="text-[22px] font-black tracking-tight text-text-primary leading-none mt-1">{value}</div>
-      {sub && <div className="text-[11px] text-text-muted mt-1">{sub}</div>}
+    <div className={`rounded-[20px] border p-4 sm:p-5 flex flex-col justify-between min-h-[120px] transition-colors ${accent ? "bg-primary text-white border-primary shadow-primary" : "bg-white border-border hover:border-primary/20"}`}>
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-2 ${accent ? "bg-white/20 text-white" : "bg-primary-light text-primary"}`}>{icon}</div>
+      <div>
+        <div className={`text-[11px] font-bold tracking-widest uppercase ${accent ? "text-white/80" : "text-text-muted"}`}>{label}</div>
+        <div className={`text-[22px] sm:text-[24px] font-black tracking-tight leading-none mt-1 ${accent ? "text-white" : "text-text-primary"}`}>{value}</div>
+        {sub && <div className={`text-[11px] mt-1 ${accent ? "text-white/80" : "text-text-muted"}`}>{sub}</div>}
+      </div>
     </div>
   );
 }
@@ -84,35 +86,44 @@ export default function FounderOverviewPage() {
         prevStats={prevStats ? { totalPassengers: prevStats.totalPassengers, totalBookings: prevStats.totalBookings } : null}
       />
 
-      <div>
-        <h2 className="text-[12px] font-bold tracking-widest uppercase text-text-muted flex items-center gap-2">
-          <BarChart3 size={14} /> Overview
-        </h2>
-        {loading ? (
-          <div className="mt-3 grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="h-[110px] bg-white rounded-2xl border border-border animate-pulse" />
-            ))}
+      <div className="bg-primary rounded-[20px] p-5 sm:p-6 text-white relative overflow-hidden">
+        <div className="absolute -right-10 -top-10 w-40 h-40 bg-white/10 rounded-full blur-2xl pointer-events-none" />
+        <div className="relative flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center"><BarChart3 size={18} /></div>
+          <div>
+            <h2 className="text-[15px] font-black tracking-tight">Overview</h2>
+            <p className="text-[12px] text-white/80">Live from Supabase — verified numbers only</p>
           </div>
-        ) : stats ? (
-          <div className="mt-3 grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <StatCard icon={<Building2 size={16} />} label="Agencies" value={stats.totalAgencies} />
-            <StatCard icon={<MapPin size={16} />} label="Branches" value={stats.totalBranches} />
-            <StatCard icon={<Bus size={16} />} label="Trips" value={stats.totalTrips} />
-            <StatCard icon={<Ticket size={16} />} label="Bookings" value={stats.totalBookings} sub={`${stats.totalPendingAgents} agents pending`} />
-            <StatCard icon={<Users size={16} />} label="Passengers" value={stats.totalPassengers} />
-            <StatCard icon={<UserCheck size={16} />} label="Agents" value={stats.totalAgents} />
-            <StatCard icon={<ShieldCheck size={16} />} label="Managers" value={stats.totalManagers} />
-            <StatCard icon={<TrendingUp size={16} />} label="Verified revenue" value={`${stats.totalVerifiedRevenue.toLocaleString()} RWF`} sub="payment verified" />
-          </div>
-        ) : null}
+        </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-border p-5">
-        <h3 className="text-[12px] font-bold tracking-widest uppercase text-text-muted">Founder note</h3>
-        <p className="text-[13px] leading-relaxed mt-2 text-text-secondary">
-          This studio is detached from the user apps — no passenger, agent, or manager route links here, and no shared session. Add agencies under Agencies, then create and approve their managers under Managers. Insights shows the real loved trips and revenue.
-        </p>
+      {loading ? (
+        <div className="grid grid-cols-2 lg:grid-cols-4 2xl:grid-cols-4 gap-3 sm:gap-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="h-[120px] bg-white rounded-[20px] border border-border animate-pulse" />
+          ))}
+        </div>
+      ) : stats ? (
+        <div className="grid grid-cols-2 lg:grid-cols-4 2xl:grid-cols-4 gap-3 sm:gap-4">
+          <StatCard icon={<Building2 size={16} />} label="Agencies" value={stats.totalAgencies} />
+          <StatCard icon={<MapPin size={16} />} label="Branches" value={stats.totalBranches} />
+          <StatCard icon={<Bus size={16} />} label="Trips" value={stats.totalTrips} />
+          <StatCard icon={<Ticket size={16} />} label="Bookings" value={stats.totalBookings} sub={`${stats.totalPendingAgents} agents pending`} />
+          <StatCard icon={<Users size={16} />} label="Passengers" value={stats.totalPassengers} />
+          <StatCard icon={<UserCheck size={16} />} label="Agents" value={stats.totalAgents} />
+          <StatCard icon={<ShieldCheck size={16} />} label="Managers" value={stats.totalManagers} />
+          <StatCard accent icon={<TrendingUp size={16} />} label="Verified revenue" value={`${stats.totalVerifiedRevenue.toLocaleString()} RWF`} sub="payment verified" />
+        </div>
+      ) : null}
+
+      <div className="bg-white rounded-[20px] border border-border p-5 flex items-start gap-3">
+        <div className="w-9 h-9 rounded-xl bg-primary-light text-primary flex items-center justify-center shrink-0"><Sparkles size={16} /></div>
+        <div>
+          <h3 className="text-[12px] font-bold tracking-widest uppercase text-text-muted">Founder note</h3>
+          <p className="text-[13px] leading-relaxed mt-1 text-text-secondary">
+            This studio is detached from the user apps — no passenger, agent, or manager route links here, and no shared session. Add agencies under Agencies, then create and approve their managers under Managers. Insights shows the real loved trips and revenue.
+          </p>
+        </div>
       </div>
     </div>
   );

@@ -92,27 +92,6 @@ const cleanStationName = (name: string) =>
     .replace(/branch|station/g, "")
     .trim();
 
-// Apple-style helper to save user notification into localStorage (Rule 3)
-const addUserNotification = (title: string, message: string) => {
-  try {
-    const existing = localStorage.getItem("urugendo_user_notifications");
-    const parsed = existing ? JSON.parse(existing) : [];
-    const newNotif = {
-      id: `notif-${Date.now()}`,
-      title,
-      message,
-      type: "booking",
-      read: false,
-      createdAt: new Date().toISOString(),
-    };
-    localStorage.setItem(
-      "urugendo_user_notifications",
-      JSON.stringify([newNotif, ...parsed]),
-    );
-  } catch {
-    // Ignore storage issues
-  }
-};
 
 export default function AgencyDashboard() {
   const router = useRouter();
@@ -375,18 +354,7 @@ export default function AgencyDashboard() {
 
         if (!isMounted) return;
         setAgentBranchId(resolvedBranchId);
-        const currentStation = cleanStationName(branch);
-        const branchTrips = (todayTrips || []).filter((t: any) => {
-          if (t.origin_branch_id && resolvedBranchId)
-            return (
-              t.origin_branch_id === resolvedBranchId ||
-              t.branch_id === resolvedBranchId
-            );
-          return (
-            cleanStationName(t.from || "").includes(currentStation) ||
-            cleanStationName(t.to || "").includes(currentStation)
-          );
-        });
+        const branchTrips = (todayTrips || []).filter((t: any) => t.origin_branch_id === resolvedBranchId || t.branch_id === resolvedBranchId);
         setTrips(branchTrips);
         setBookings((branchBookingsRaw as ExtendedBooking[]) || []);
         setTodayRevenueData(branchRevenue as any);
@@ -876,13 +844,38 @@ export default function AgencyDashboard() {
     ).size,
   };
 
-  const handleVerifySearch = async () => {
-    if (!searchSeat.trim()) {
+  const [verifySuggestions, setVerifySuggestions] = useState<ExtendedBooking[]>([]);
+  const [verifyFocused, setVerifyFocused] = useState(false);
+  const verifyWrapRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (verifyWrapRef.current && !verifyWrapRef.current.contains(e.target as Node)) {
+        setVerifyFocused(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+
+  useEffect(() => {
+    const q = searchSeat.trim().toLowerCase();
+    if (!q) { setVerifySuggestions([]); return; }
+    const hits = bookings.filter((b) => {
+      const hay = [b.momoName, b.momoNumber, b.momoAccountName as any, b.momoPhoneNumber as any, b.passengerName, b.passengerPhone, b.shortCode, (b as any).seat, b.seatNumber].filter(Boolean).join(" ").toLowerCase();
+      return hay.includes(q);
+    }).slice(0, 8);
+    setVerifySuggestions(hits);
+  }, [searchSeat, bookings]);
+
+  const handleVerifySearch = async (override?: string) => {
+    const raw = (override ?? searchSeat).trim();
+    if (!raw) {
       setVerifyResult(null);
       return;
     }
     setVerifying(true);
-    const query = searchSeat.toUpperCase().trim();
+    const query = raw.toUpperCase().trim();
 
     let found = bookings.find((b) => {
       const seatMatch =
@@ -892,7 +885,9 @@ export default function AgencyDashboard() {
         b.shortCode?.toUpperCase() === query ||
         b.id?.toUpperCase().includes(query);
       const nameMatch = b.passengerName?.toUpperCase().includes(query);
-      return seatMatch || codeMatch || nameMatch;
+      const momoNameMatch = (b.momoName || (b as any).momoAccountName || "").toUpperCase().includes(query);
+      const momoNumMatch = (b.momoNumber || (b as any).momoPhoneNumber || "").includes(query);
+      return seatMatch || codeMatch || nameMatch || momoNameMatch || momoNumMatch;
     });
 
     if (!found) {
@@ -907,6 +902,7 @@ export default function AgencyDashboard() {
 
     setVerifyResult({ found: !!found, booking: found });
     setVerifying(false);
+    setVerifyFocused(false);
   };
 
   const handleConfirmMoMoPayment = async (bookingId: string) => {
@@ -924,21 +920,8 @@ export default function AgencyDashboard() {
             : b,
         ),
       );
-      // Trigger notification so the passenger knows the ticket is confirmed.
-      const confirmedBooking = bookings.find((b) => b.id === bookingId);
-      const route = confirmedBooking?.trip
-        ? `${(confirmedBooking.trip as any)?.from || ""} → ${(confirmedBooking.trip as any)?.to || ""}`
-        : "";
-      const time = (confirmedBooking?.trip as any)?.departureTime || "08:30 AM";
-      addUserNotification(
-        "✅ Ticket Confirmed!",
-        `Your ticket (${route} at ${time}) has been verified and is ready for boarding. Check your tickets page.`,
-      );
-
-      // Also send a DB-backed notification for the passenger app.
-      const { data: authData } = await supabase.auth.getUser();
       const confirmedBooking2 = bookings.find((b) => b.id === bookingId);
-      if (authData.user && confirmedBooking2?.userId) {
+      if (confirmedBooking2?.userId) {
         const route2 = confirmedBooking2?.trip
           ? `${(confirmedBooking2.trip as any)?.from || ""} → ${(confirmedBooking2.trip as any)?.to || ""}`
           : "";
@@ -973,11 +956,16 @@ export default function AgencyDashboard() {
             : null,
         );
       }
-      // Trigger notification for verified ticket
-      addUserNotification(
-        "Ticket Verified!",
-        "Your ticket from Musanze to Kigali (08:30 AM) has been received and verified! You may check it in your tickets page.",
-      );
+      const boardedBooking = bookings.find((b) => b.id === bookingId);
+      if (boardedBooking?.userId) {
+        await notifyUser({
+          userId: boardedBooking.userId,
+          title: "✅ Ticket Verified — Boarded",
+          message: `Your ticket ${boardedBooking.shortCode || bookingId.slice(0,6)} has been verified and marked as boarded. Have a safe trip!`,
+          type: "verification",
+          actionUrl: `/ticket/${bookingId}`,
+        });
+      }
     }
     setVerifying(false);
   };
@@ -1299,7 +1287,7 @@ export default function AgencyDashboard() {
               </h3>
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex gap-2" ref={verifyWrapRef}>
               <div className="flex-1 relative">
                 <Search
                   size={16}
@@ -1309,13 +1297,35 @@ export default function AgencyDashboard() {
                   type="text"
                   value={searchSeat}
                   onChange={(e) => setSearchSeat(e.target.value)}
+                  onFocus={() => setVerifyFocused(true)}
                   onKeyDown={(e) => e.key === "Enter" && handleVerifySearch()}
-                  placeholder="Enter Ticket Code, Seat No, or Name"
+                  placeholder="MoMo name, MoMo number, ticket code or name"
                   className="w-full pl-9 pr-3 py-2.5 border border-border rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                 />
+                {verifyFocused && verifySuggestions.length > 0 && (
+                  <div className="absolute z-20 mt-1.5 w-full bg-white border border-border rounded-xl shadow-lg overflow-hidden max-h-64 overflow-y-auto">
+                    {verifySuggestions.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => {
+                          setSearchSeat(s.momoName || s.passengerName || s.shortCode || "");
+                          handleVerifySearch(s.momoName || s.momoNumber || s.shortCode || s.id);
+                        }}
+                        className="w-full text-left px-3 py-2.5 hover:bg-emerald-50 flex items-center justify-between gap-2 cursor-pointer"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-[13px] font-bold text-slate-900 truncate">{s.momoName || s.passengerName} <span className="font-normal text-slate-500">· {s.momoNumber || s.passengerPhone || ""}</span></div>
+                          <div className="text-[11px] text-slate-500 truncate">{s.shortCode} · {s.trip?.from || ""} → {s.trip?.to || ""} · {s.status}</div>
+                        </div>
+                        <span className="text-[11px] font-bold text-primary shrink-0">Select</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <button
-                onClick={handleVerifySearch}
+                onClick={() => handleVerifySearch()}
                 disabled={verifying}
                 className="bg-primary text-white px-4 rounded-xl font-bold text-[12px] shadow-sm active:scale-95 transition-transform flex items-center gap-1 cursor-pointer"
               >

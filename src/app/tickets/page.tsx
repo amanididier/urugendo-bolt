@@ -19,7 +19,6 @@ import {
 import { fetchBookingsByUser } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import type { Booking } from "@/lib/types";
-import { addUserNotification } from "@/lib/notifications";
 
 const tabs = ["Upcoming", "Past"] as const;
 type Tab = (typeof tabs)[number];
@@ -135,29 +134,10 @@ export default function TicketsPage() {
                     ? `✨ Loved the experience? Booking your journey through Urugendo is just the beginning! Share the smooth ride with your friends and family using your personal invite link: ${shareLink}`
                     : `🌟 Another destination reached safely! If Urugendo made your travel effortless today, spread the love with your friends: ${shareLink}`;
 
-              // Also fire a system-level browser notification (visible even when app is in background / swipe-down tray)
-              try {
-                if (typeof window !== "undefined" && "Notification" in window) {
-                  if (Notification.permission === "granted") {
-                    new Notification(isFirstTrip ? "Trip Completed!" : "Destination Reached!", { body: msg, icon: "/icon-192.png" });
-                  } else if (Notification.permission !== "denied") {
-                    Notification.requestPermission().then((perm) => {
-                      if (perm === "granted") new Notification(isFirstTrip ? "Trip Completed!" : "Destination Reached!", { body: msg, icon: "/icon-192.png" });
-                    });
-                  }
-                }
-              } catch {}
-              addUserNotification({
-                title:
-                  language === "RW"
-                    ? isFirstTrip
-                      ? "✨ Urugendo rwarangiye!"
-                      : "🌟 Wageze ku ntego!"
-                    : isFirstTrip
-                      ? "✨ Trip Completed!"
-                      : "🌟 Destination Reached!",
-                message: msg,
-                type: "promo",
+              import("@/lib/notificationsService").then(({ notifyUser }) => {
+                supabase.auth.getUser().then(({ data }) => {
+                  if (data.user) notifyUser({ userId: data.user.id, title: isFirstTrip ? "✨ Trip Completed!" : "🌟 Destination Reached!", message: msg, type: "promo", actionUrl: `/ticket/${booking.id}` });
+                });
               });
             }
           }

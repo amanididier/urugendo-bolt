@@ -15,7 +15,7 @@ import {
   fetchDatabaseBranches,
 } from "@/lib/data";
 import { supabase } from "@/lib/supabase";
-import { addUserNotification } from "@/lib/notifications";
+import { notifyUser } from "@/lib/notificationsService";
 // Removed unused NotificationsPage import to prevent strict TS warnings
 
 export type UserRole = "passenger" | "agent" | "manager";
@@ -224,11 +224,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const notificationId = `urugendo_departure_notified_1hr_${booking.id}`;
           if (!localStorage.getItem(notificationId)) {
             localStorage.setItem(notificationId, "true");
-            addUserNotification({
-              title: "⏰ Upcoming Trip Reminder",
-              message:
-                "⏰ Upcoming Trip: Today you have a trip to Kigali! Get your bags packed and ready so you don’t miss your departure.",
-              type: "reminder",
+            supabase.auth.getUser().then(({ data }) => {
+              if (data.user && booking.userId) notifyUser({ userId: booking.userId, title: "⏰ Upcoming Trip Reminder", message: "⏰ Upcoming Trip: Today you have a trip to Kigali! Get your bags packed and ready so you don't miss your departure.", type: "reminder", actionUrl: `/ticket/${booking.id}` });
             });
           }
         }
@@ -237,11 +234,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const notificationId = `urugendo_departure_notified_15min_${booking.id}`;
           if (!localStorage.getItem(notificationId)) {
             localStorage.setItem(notificationId, "true");
-            addUserNotification({
-              title: "🚌 Final Call",
-              message:
-                "🚌 Final Call: Your bus will depart in 15 minutes. Please head to the terminal gate for final ticket verification.",
-              type: "reminder",
+            supabase.auth.getUser().then(({ data }) => {
+              if (data.user && booking.userId) notifyUser({ userId: booking.userId, title: "🚌 Final Call", message: "🚌 Final Call: Your bus will depart in 15 minutes. Please head to the terminal gate for final ticket verification.", type: "reminder", actionUrl: `/ticket/${booking.id}` });
             });
           }
         }

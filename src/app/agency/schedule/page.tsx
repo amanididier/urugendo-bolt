@@ -100,6 +100,7 @@ function AgencyScheduleContent() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [agentBranch, setAgentBranch] = useState("Musanze");
+  const [agencyLabel, setAgencyLabel] = useState("");
   const [momoBranchCodes, setMomoBranchCodes] = useState<BranchMomo[]>([]);
 
   const [showDelayModal, setShowDelayModal] = useState(false);
@@ -172,6 +173,20 @@ function AgencyScheduleContent() {
       } catch {
         // Fallback default codes handled safely
       }
+    })();
+
+    // Resolve real agency name for header (was hardcoded "Bus Operator")
+    (async () => {
+      const email = localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email");
+      if (!email) return;
+      try {
+        const { data } = await supabase.from("agency_agents").select("branch_id,agency_name").eq("email", email).maybeSingle();
+        if ((data as any)?.agency_name) { setAgencyLabel((data as any).agency_name); return; }
+        if ((data as any)?.branch_id) {
+          const { data: br } = await supabase.from("branches").select("agency_name").eq("id", (data as any).branch_id).maybeSingle();
+          if ((br as any)?.agency_name) setAgencyLabel((br as any).agency_name);
+        }
+      } catch {}
     })();
   }, []);
 
@@ -480,7 +495,7 @@ function AgencyScheduleContent() {
           </motion.button>
         </div>
         <div className="flex items-center gap-2 text-white/80 text-[12px] font-semibold mb-1">
-          <Building size={14} /> Bus Operator • {agentBranch} Branch
+          <Building size={14} /> {agencyLabel || "Bus Operator"} • {agentBranch} Branch
         </div>
         <h1 className="text-[22px] font-extrabold text-white tracking-tight">
           {activeTrip

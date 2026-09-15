@@ -237,19 +237,22 @@ export default function PaymentPage() {
       setState("success");
       setVerificationPopup(true);
 
-      // Batch 4: notify the passenger that their MoMo payment was received
-      // and the ticket is awaiting agent verification (not yet confirmed).
+      // DB notification: passenger sees Facebook-style slide-down via NotificationToast + bell
       const { data: authData } = await supabase.auth.getUser();
       if (authData.user && dbBookingId) {
         const route = `${selectedTrip.from} → ${selectedTrip.to}`;
         const date = new Date(selectedTrip.date || Date.now()).toLocaleDateString();
-        notifyUser({
+        await notifyUser({
           userId: authData.user.id,
           title: "⏳ Awaiting Verification",
           message: `Your MoMo payment for the ${route} trip on ${date} was received. The ${operatorName} agent will verify and confirm your ticket (Code: ${shortCode}) shortly.`,
           type: "booking",
           actionUrl: `/ticket/${dbBookingId}`,
         });
+        // Poke System Notification permission gate once (the toast will also trigger it via realtime)
+        if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+          Notification.requestPermission().catch(() => {});
+        }
       }
 
       const navigateId = dbBookingId || localBookingId;
