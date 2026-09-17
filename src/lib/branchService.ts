@@ -3,6 +3,10 @@ import { supabase } from "@/lib/supabase";
 export interface PeriodStats {
   passengers: number;
   revenue: number;
+  urugendoPassengers?: number;
+  urugendoRevenue?: number;
+  paperPassengers?: number;
+  paperRevenue?: number;
 }
 
 export function agencyPrefix(agencyName: string): string {
@@ -44,9 +48,6 @@ export interface BranchRecord {
   stats: Record<"today" | "monthly" | "yearly", PeriodStats>;
 }
 
-/**
- * Fetch all agency branches from Supabase database
- */
 export async function fetchAgencyBranches(agencyName?: string): Promise<BranchRecord[]> {
   try {
     let query = supabase.from("branches").select("id, name, location, agency_name, station_code, momo_code, phone, agent_name, agent_email, stats");
@@ -79,24 +80,6 @@ export async function fetchAgencyBranches(agencyName?: string): Promise<BranchRe
   }
 }
 
-/**
- * Fetch real revenue for a specific branch and time period by aggregating
- * paid bookings. Used by both the manager dashboard (all branches) and the
- * agency dashboard (own branch only).
- *
- * A booking counts as "real money" if EITHER:
- *   - payment_status = 'verified'  (agent confirmed the MoMo receipt — Batch 4)
- *   - status        = 'confirmed' (legacy path, no payment_status column)
- *
- * This dual-criterion query survives the partial migration where some
- * bookings were confirmed before the Batch 4 payment_status column was
- * backfilled.
- *
- * @param branchId  - branches.id of the target branch
- * @param period    - "today" | "monthly" | "yearly"
- * @param now       - optional Date used as the reference point (defaults to now).
- *                    Pass a fixed Date in tests to avoid clock skew.
- */
 export async function fetchBranchRevenue(
   branchId: string,
   period: "today" | "monthly" | "yearly" = "today",
@@ -115,34 +98,42 @@ export async function fetchBranchRevenue(
   }
 
   try {
-    // Batch 5: count both new (payment_status='verified') and legacy
-    // (status='confirmed') paths so revenue is correct in mixed-state data.
     const { data, error } = await supabase
       .from("bookings")
-      .select("fare_amount, created_at, status, payment_status")
+      .select("fare_amount, created_at, status, payment_status, is_paper_ticket")
       .eq("branch_id", branchId)
       .gte("created_at", start.toISOString())
       .or("payment_status.eq.verified,status.eq.confirmed");
 
     if (error || !data) {
-      return { passengers: 0, revenue: 0 };
+      return { passengers: 0, revenue: 0, urugendoPassengers: 0, urugendoRevenue: 0, paperPassengers: 0, paperRevenue: 0 };
     }
 
-    const passengers = data.length;
-    const revenue = data.reduce(
-      (sum, item) => sum + (Number(item.fare_amount) || 0),
-      0,
-    );
+    const urugendoBookings = data.filter((b) => !b.is_paper_ticket);
+    const paperBookings = data.filter((b) => b.is_paper_ticket);
 
-    return { passengers, revenue };
+    const urugendoPassengers = urugendoBookings.length;
+    const urugendoRevenue = urugendoBookings.reduce((sum, item) => sum + (Number(item.fare_amount) || 0), 0);
+
+    const paperPassengers = paperBookings.length;
+    const paperRevenue = paperBookings.reduce((sum, item) => sum + (Number(item.fare_amount) || 0), 0);
+
+    const passengers = urugendoPassengers + paperPassengers;
+    const revenue = urugendoRevenue + paperRevenue;
+
+    return {
+      passengers,
+      revenue,
+      urugendoPassengers,
+      urugendoRevenue,
+      paperPassengers,
+      paperRevenue,
+    };
   } catch {
-    return { passengers: 0, revenue: 0 };
+    return { passengers: 0, revenue: 0, urugendoPassengers: 0, urugendoRevenue: 0, paperPassengers: 0, paperRevenue: 0 };
   }
 }
 
-/**
- * Insert or register a brand new branch dynamically into Supabase
- */
 export async function createNewBranch(branch: BranchRecord): Promise<boolean> {
   try {
     const payload: Record<string, any> = {
@@ -170,9 +161,6 @@ export async function createNewBranch(branch: BranchRecord): Promise<boolean> {
   }
 }
 
-/**
- * Delete a branch dynamically from Supabase database
- */
 export async function deleteBranch(branchId: string): Promise<boolean> {
   try {
     const { error } = await supabase.from("branches").delete().eq("id", branchId);
@@ -187,3 +175,37 @@ export async function deleteBranch(branchId: string): Promise<boolean> {
   }
 }
 
+export async function updateManagerPassword(
+  managerId: string,
+  currentPass: string,
+  newPass: string,
+): Promise<{ ok: boolean; message: string }> {
+  try {
+    const { data: mgr, error } = await supabase
+      .from("agency_managers")
+      .select("id, password_hash")
+      .eq("id", managerId)
+      .maybeSingle();
+
+    if (error || !mgr) {
+      return { ok: false, message: "Manager account not found." };
+    }
+
+    if (mgr.password_hash && mgr.password_hash !== currentPass) {
+      return { ok: false, message: "Current master password is incorrect." };
+    }
+
+    const { error: updateErr } = await supabase
+      .from("agency_managers")
+      .update({ password_hash: newPass })
+      .eq("id", managerId);
+
+    if (updateErr) {
+      return { ok: false, message: updateErr.message };
+    }
+
+    return { ok: true, message: "Password updated successfully." };
+  } catch (err: any) {
+    return { ok: false, message: err?.message || "Failed to update password." };
+  }
+}

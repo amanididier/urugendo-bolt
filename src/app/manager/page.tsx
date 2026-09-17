@@ -210,6 +210,8 @@ export default function AgencyManagerApp() {
   const [showPendingAgentsView, setShowPendingAgentsView] = useState(false);
 
   // ── Time / Filtering ──────────────────────────────────────────────────
+  type RevenueCategory = "overall" | "urugendo" | "paper";
+  const [revenueCategory, setRevenueCategory] = useState<RevenueCategory>("overall");
   const [selectedPeriod, setSelectedPeriod] = useState<TimePeriod>("today");
   const [customDate, setCustomDate] = useState<string>(
     new Date().toISOString().split("T")[0],
@@ -409,14 +411,17 @@ export default function AgencyManagerApp() {
     stats: periodStats[b.id] ?? { passengers: 0, revenue: 0 },
   }));
 
-  const totalPassengers = branchStats.reduce(
-    (acc, b) => acc + b.stats.passengers,
-    0,
-  );
-  const totalRevenue = branchStats.reduce(
-    (acc, b) => acc + b.stats.revenue,
-    0,
-  );
+  const totalPassengers = branchStats.reduce((acc, b) => {
+    if (revenueCategory === "urugendo") return acc + (b.stats.urugendoPassengers ?? b.stats.passengers);
+    if (revenueCategory === "paper") return acc + (b.stats.paperPassengers ?? 0);
+    return acc + b.stats.passengers;
+  }, 0);
+
+  const totalRevenue = branchStats.reduce((acc, b) => {
+    if (revenueCategory === "urugendo") return acc + (b.stats.urugendoRevenue ?? b.stats.revenue);
+    if (revenueCategory === "paper") return acc + (b.stats.paperRevenue ?? 0);
+    return acc + b.stats.revenue;
+  }, 0);
   const topBranch = [...branchStats].sort(
     (a, b) => b.stats.revenue - a.stats.revenue,
   )[0];
@@ -786,6 +791,25 @@ export default function AgencyManagerApp() {
                   <ChevronRight size={18} className="text-amber-700" />
                 </div>
               )}
+
+              <div className="flex bg-white p-1 rounded-2xl border border-border shadow-sm gap-1 mb-3">
+                {(["overall", "urugendo", "paper"] as RevenueCategory[]).map(
+                  (cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setRevenueCategory(cat)}
+                      className={`flex-1 py-2 rounded-xl text-xs font-bold capitalize transition-all cursor-pointer ${
+                        revenueCategory === cat
+                          ? "bg-primary text-white shadow-md"
+                          : "text-text-muted hover:text-text-primary"
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ),
+                )}
+              </div>
 
               <PeriodSelector
                 value={selectedPeriod}

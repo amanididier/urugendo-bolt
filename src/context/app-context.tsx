@@ -292,7 +292,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setSearchState((prev) => ({
       ...prev,
-      date: prev.date || new Date().toISOString().split("T")[0],
+      date: prev.date || new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Kigali" }).format(new Date()),
     }));
   }, []);
 
