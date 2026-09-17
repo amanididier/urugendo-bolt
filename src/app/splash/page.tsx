@@ -49,7 +49,7 @@ export default function SplashScreen() {
           </div>
 
           <div className="flex bg-white/10 backdrop-blur-md p-1 rounded-full border border-white/15">
-            {(["EN", "RW", "FR"] as const).map((lang) => (
+            {(["EN", "RW"] as const).map((lang) => (
               <button
                 key={lang}
                 onClick={() => setLanguage(lang)}
@@ -98,7 +98,9 @@ export default function SplashScreen() {
               onClick={() => router.push("/agency/agency-login")}
               className="w-full h-11 bg-white/10 hover:bg-white/15 text-white/90 font-bold text-[13px] rounded-2xl backdrop-blur-md border border-white/15 transition-all cursor-pointer"
             >
-              {language === "RW" ? "Injira nka Agent cyangwa Manager" : "Agency Agent / Manager Portal"}
+              {language === "RW"
+                ? "Injira nka Agent cyangwa Manager"
+                : "Agency Agent / Manager Portal"}
             </button>
           </div>
         </div>
