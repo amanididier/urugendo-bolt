@@ -23,6 +23,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/context/app-context";
 import { Language } from "@/lib/types";
+import { fetchUnreadCount } from "@/lib/notificationsService";
 
 export default function AgentProfilePage() {
   const router = useRouter();
@@ -36,8 +37,8 @@ export default function AgentProfilePage() {
   // Batch 3: real branch contact phone loaded from branches.phone
   const [branchPhone, setBranchPhone] = useState("0796919900");
 
-  // Notifications
-  const [unreadNotificationsCount] = useState(3);
+  // Batch 6.5: fetch real unread notification count from database
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
 
   // Support Modal State
   const [showSupportModal, setShowSupportModal] = useState(false);
@@ -160,6 +161,22 @@ export default function AgentProfilePage() {
     }
 
     loadAgentDetails();
+
+    // Batch 6.5: fetch real notification count on page load
+    (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        try {
+          const count = await fetchUnreadCount(user.id);
+          setUnreadNotificationsCount(count);
+        } catch (err) {
+          // Silently fail — notification count is best-effort
+          console.warn("[profile] failed to fetch notification count:", err);
+        }
+      }
+    })();
   }, [agentName, agencyName, branchName]);
 
   // Get Initials for Avatar
