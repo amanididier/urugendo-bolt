@@ -90,7 +90,7 @@ export default function SplashScreen() {
               onClick={continueAsPassenger}
               className="w-full h-13 bg-primary text-white font-extrabold text-[15px] rounded-2xl shadow-lg shadow-primary/30 flex items-center justify-center gap-2.5 active:scale-[0.98] transition-all cursor-pointer"
             >
-              <span>{t("get_started", language)}</span>
+              <span>{t("getStarted", language)}</span>
               <ArrowRight size={18} />
             </button>
 

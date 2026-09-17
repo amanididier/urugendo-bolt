@@ -33,6 +33,12 @@ export function NotificationToast() {
   }, []);
 
   useEffect(() => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      if (Notification.permission === "default") {
+        Notification.requestPermission().catch(() => {});
+      }
+    }
+
     let ch: any = null;
     let uid: string | null = null;
 

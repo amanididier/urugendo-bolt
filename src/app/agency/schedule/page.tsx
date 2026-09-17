@@ -123,7 +123,7 @@ function AgencyScheduleContent() {
   });
 
   useEffect(() => {
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Kigali" }).format(new Date());
     const branch =
       localStorage.getItem("urugendo_branch") ||
       localStorage.getItem("urugendo_station") ||
@@ -201,7 +201,7 @@ function AgencyScheduleContent() {
         if ((ar as any)?.branch_id) currentBranchId = (ar as any).branch_id;
       }
     } catch {}
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Kigali" }).format(new Date());
     const [tripData, bookingData] = await Promise.all([
       fetchTripsByDate(todayStr, currentBranchId || undefined),
       currentBranchId ? fetchAllBookings().then((all) => all.filter((b: any) => (b.branchId || (b as any).branch_id) === currentBranchId)) : Promise.resolve([] as any),

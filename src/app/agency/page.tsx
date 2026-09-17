@@ -92,7 +92,6 @@ const cleanStationName = (name: string) =>
     .replace(/branch|station/g, "")
     .trim();
 
-
 export default function AgencyDashboard() {
   const router = useRouter();
   const [trips, setTrips] = useState<Trip[]>([]);
@@ -354,7 +353,11 @@ export default function AgencyDashboard() {
 
         if (!isMounted) return;
         setAgentBranchId(resolvedBranchId);
-        const branchTrips = (todayTrips || []).filter((t: any) => t.origin_branch_id === resolvedBranchId || t.branch_id === resolvedBranchId);
+        const branchTrips = (todayTrips || []).filter(
+          (t: any) =>
+            t.origin_branch_id === resolvedBranchId ||
+            t.branch_id === resolvedBranchId,
+        );
         setTrips(branchTrips);
         setBookings((branchBookingsRaw as ExtendedBooking[]) || []);
         setTodayRevenueData(branchRevenue as any);
@@ -457,21 +460,22 @@ export default function AgencyDashboard() {
             : false;
           if (payload.eventType === "INSERT" && matches) {
             // Trigger a light reload of trips (keeps operator join correct) — cheap, no bookings reload
-            fetchTripsByDate(new Date().toISOString().split("T")[0], agentBranchId).then(
-              (all) => {
-                setTrips((prev) => {
-                  const filtered = all.filter(
-                    (t: any) =>
-                      t.origin_branch_id === agentBranchId ||
-                      t.branch_id === agentBranchId,
-                  );
-                  // merge by id to avoid duplicates
-                  const byId = new Map(prev.map((t) => [t.id, t]));
-                  for (const t of filtered) byId.set(t.id, t);
-                  return Array.from(byId.values());
-                });
-              },
-            );
+            fetchTripsByDate(
+              new Date().toISOString().split("T")[0],
+              agentBranchId,
+            ).then((all) => {
+              setTrips((prev) => {
+                const filtered = all.filter(
+                  (t: any) =>
+                    t.origin_branch_id === agentBranchId ||
+                    t.branch_id === agentBranchId,
+                );
+                // merge by id to avoid duplicates
+                const byId = new Map(prev.map((t) => [t.id, t]));
+                for (const t of filtered) byId.set(t.id, t);
+                return Array.from(byId.values());
+              });
+            });
             return;
           }
           if (payload.eventType === "UPDATE" && (matches || oldMatches)) {
@@ -756,7 +760,7 @@ export default function AgencyDashboard() {
           <Table ss:ExpandedColumnCount="${tableHeaders.length}" ss:FullColumns="1" ss:FullRows="1" ss:DefaultColumnWidth="110" ss:DefaultRowHeight="20">
             <Row ss:Height="26">
               <Cell ss:StyleID="Header" ss:MergeAcross="${tableHeaders.length - 1}">
-                <Data ss:Type="String">WEKA EXPRESS — STATION MANIFEST (${manifestSubTab.toUpperCase()})</Data>
+                <Data ss:Type="String">BUS OPERATOR — STATION MANIFEST (${manifestSubTab.toUpperCase()})</Data>
               </Cell>
             </Row>
             <Row ss:Height="18">
@@ -841,13 +845,18 @@ export default function AgencyDashboard() {
     ).size,
   };
 
-  const [verifySuggestions, setVerifySuggestions] = useState<ExtendedBooking[]>([]);
+  const [verifySuggestions, setVerifySuggestions] = useState<ExtendedBooking[]>(
+    [],
+  );
   const [verifyFocused, setVerifyFocused] = useState(false);
   const verifyWrapRef = React.useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      if (verifyWrapRef.current && !verifyWrapRef.current.contains(e.target as Node)) {
+      if (
+        verifyWrapRef.current &&
+        !verifyWrapRef.current.contains(e.target as Node)
+      ) {
         setVerifyFocused(false);
       }
     };
@@ -857,11 +866,29 @@ export default function AgencyDashboard() {
 
   useEffect(() => {
     const q = searchSeat.trim().toLowerCase();
-    if (!q) { setVerifySuggestions([]); return; }
-    const hits = bookings.filter((b) => {
-      const hay = [b.momoName, b.momoNumber, b.momoAccountName as any, b.momoPhoneNumber as any, b.passengerName, b.passengerPhone, b.shortCode, (b as any).seat, b.seatNumber].filter(Boolean).join(" ").toLowerCase();
-      return hay.includes(q);
-    }).slice(0, 8);
+    if (!q) {
+      setVerifySuggestions([]);
+      return;
+    }
+    const hits = bookings
+      .filter((b) => {
+        const hay = [
+          b.momoName,
+          b.momoNumber,
+          b.momoAccountName as any,
+          b.momoPhoneNumber as any,
+          b.passengerName,
+          b.passengerPhone,
+          b.shortCode,
+          (b as any).seat,
+          b.seatNumber,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(q);
+      })
+      .slice(0, 8);
     setVerifySuggestions(hits);
   }, [searchSeat, bookings]);
 
@@ -882,9 +909,17 @@ export default function AgencyDashboard() {
         b.shortCode?.toUpperCase() === query ||
         b.id?.toUpperCase().includes(query);
       const nameMatch = b.passengerName?.toUpperCase().includes(query);
-      const momoNameMatch = (b.momoName || (b as any).momoAccountName || "").toUpperCase().includes(query);
-      const momoNumMatch = (b.momoNumber || (b as any).momoPhoneNumber || "").includes(query);
-      return seatMatch || codeMatch || nameMatch || momoNameMatch || momoNumMatch;
+      const momoNameMatch = (b.momoName || (b as any).momoAccountName || "")
+        .toUpperCase()
+        .includes(query);
+      const momoNumMatch = (
+        b.momoNumber ||
+        (b as any).momoPhoneNumber ||
+        ""
+      ).includes(query);
+      return (
+        seatMatch || codeMatch || nameMatch || momoNameMatch || momoNumMatch
+      );
     });
 
     if (!found) {
@@ -958,7 +993,7 @@ export default function AgencyDashboard() {
         await notifyUser({
           userId: boardedBooking.userId,
           title: "✅ Ticket Verified — Boarded",
-          message: `Your ticket ${boardedBooking.shortCode || bookingId.slice(0,6)} has been verified and marked as boarded. Have a safe trip!`,
+          message: `Your ticket ${boardedBooking.shortCode || bookingId.slice(0, 6)} has been verified and marked as boarded. Have a safe trip!`,
           type: "verification",
           actionUrl: `/ticket/${bookingId}`,
         });
@@ -1076,7 +1111,7 @@ export default function AgencyDashboard() {
                 Agency Dashboard
               </h1>
               <p className="text-[12px] text-white/80 font-medium">
-                {agencyLabel || "Weka Express"} • {agentBranch}
+                {agencyLabel || "Bus operator"} • {agentBranch}
               </p>
             </div>
           </div>
@@ -1226,7 +1261,7 @@ export default function AgencyDashboard() {
                   <Ticket size={14} className="text-primary" />
                 </div>
                 <span className="text-[10px] font-medium text-text-muted">
-                  Weka Online
+                  Urugendo
                 </span>
               </div>
               <div className="text-[20px] font-bold text-primary">
@@ -1306,16 +1341,30 @@ export default function AgencyDashboard() {
                         key={s.id}
                         type="button"
                         onClick={() => {
-                          setSearchSeat(s.momoName || s.passengerName || s.shortCode || "");
-                          handleVerifySearch(s.momoName || s.momoNumber || s.shortCode || s.id);
+                          setSearchSeat(
+                            s.momoName || s.passengerName || s.shortCode || "",
+                          );
+                          handleVerifySearch(
+                            s.momoName || s.momoNumber || s.shortCode || s.id,
+                          );
                         }}
                         className="w-full text-left px-3 py-2.5 hover:bg-emerald-50 flex items-center justify-between gap-2 cursor-pointer"
                       >
                         <div className="min-w-0">
-                          <div className="text-[13px] font-bold text-slate-900 truncate">{s.momoName || s.passengerName} <span className="font-normal text-slate-500">· {s.momoNumber || s.passengerPhone || ""}</span></div>
-                          <div className="text-[11px] text-slate-500 truncate">{s.shortCode} · {s.trip?.from || ""} → {s.trip?.to || ""} · {s.status}</div>
+                          <div className="text-[13px] font-bold text-slate-900 truncate">
+                            {s.momoName || s.passengerName}{" "}
+                            <span className="font-normal text-slate-500">
+                              · {s.momoNumber || s.passengerPhone || ""}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-500 truncate">
+                            {s.shortCode} · {s.trip?.from || ""} →{" "}
+                            {s.trip?.to || ""} · {s.status}
+                          </div>
                         </div>
-                        <span className="text-[11px] font-bold text-primary shrink-0">Select</span>
+                        <span className="text-[11px] font-bold text-primary shrink-0">
+                          Select
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -1616,7 +1665,7 @@ export default function AgencyDashboard() {
                         </div>
                         <div className="bg-emerald-50 p-2 rounded-xl">
                           <span className="text-[9.5px] font-bold text-emerald-600 block uppercase">
-                            Weka App
+                            Urugendo App
                           </span>
                           <span className="text-xs font-black text-[#00B14F] flex items-center justify-center gap-1">
                             <Ticket size={12} />
@@ -1672,7 +1721,7 @@ export default function AgencyDashboard() {
                       <div className="grid grid-cols-3 gap-2 py-2 border-y border-slate-100 text-center">
                         <div>
                           <span className="text-[9.5px] font-bold text-slate-400 block uppercase">
-                            Weka App
+                            Urugendo App
                           </span>
                           <span className="text-xs font-black text-[#00B14F]">
                             {trip.urugendoPassengers} Passengers
