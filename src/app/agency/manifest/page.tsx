@@ -16,12 +16,13 @@ import {
   Armchair,
   FileSpreadsheet,
 } from "lucide-react";
-import { fetchTripsByDate } from "@/lib/api";
+import { fetchTripsByDate, updateTripEmptySeats } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import type { AgencyBranch, Trip } from "@/lib/types";
 
 interface ManifestTrip {
   id: string;
+  tripId: string;
   busPlate: string;
   driverName: string;
   from: string;
@@ -64,15 +65,6 @@ export default function AgencyManifestPage() {
     const savedBranch = localStorage.getItem("urugendo_branch") || "Musanze";
     setStationBranch(savedBranch);
 
-    const savedEmptySeats = localStorage.getItem("urugendo_empty_seats");
-    if (savedEmptySeats) {
-      try {
-        setEmptySeats(JSON.parse(savedEmptySeats));
-      } catch (e) {
-        console.error("Failed to parse saved empty seats", e);
-      }
-    }
-
     async function loadData() {
       try {
         const em = localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email");
@@ -92,6 +84,14 @@ export default function AgencyManifestPage() {
         }
         setTrips(todayTrips || []);
         setBookings(filteredBookings || []);
+        setEmptySeats(
+          Object.fromEntries(
+            (todayTrips || []).map((t: any) => [
+              t.id,
+              Number(t.emptySeats) || 0,
+            ]),
+          ),
+        );
       } catch (error) {
         console.error("Failed to fetch manifest data:", error);
       }
@@ -111,6 +111,7 @@ export default function AgencyManifestPage() {
     .filter((t) => cleanStationName(t.to || "").includes(currentStationKey))
     .map((t, idx) => ({
       id: `inc-${t.id || idx}`,
+      tripId: t.id,
       busPlate: t.plateNumber || "RAC 112D",
       driverName: t.driverName || "Station Driver",
       from: t.from,
@@ -129,6 +130,7 @@ export default function AgencyManifestPage() {
     .filter((t) => cleanStationName(t.from || "").includes(currentStationKey))
     .map((t, idx) => ({
       id: `out-${t.id || idx}`,
+      tripId: t.id,
       busPlate: t.plateNumber || "RAD 882D",
       driverName: t.driverName || "Station Driver",
       from: getBranchName(stationBranch),
@@ -143,8 +145,9 @@ export default function AgencyManifestPage() {
       status: t.status || "Scheduled",
     }));
 
-  const handleSaveEmptySeats = (tripId: string) => {
-    localStorage.setItem("urugendo_empty_seats", JSON.stringify(emptySeats));
+  const handleSaveEmptySeats = async (tripId: string) => {
+    const saved = await updateTripEmptySeats(tripId, emptySeats[tripId] ?? 0);
+    if (!saved) return;
     setSavedFeedback(tripId);
     setTimeout(() => setSavedFeedback(null), 2500);
   };
@@ -206,7 +209,7 @@ export default function AgencyManifestPage() {
           .join("")
       : activeList
           .map((trip) => {
-            const empty = emptySeats[trip.id] ?? 0;
+            const empty = emptySeats[trip.tripId] ?? 0;
             const paperTickets = Math.max(
               0,
               trip.capacity - trip.urugendoPassengers - empty,
@@ -410,7 +413,7 @@ export default function AgencyManifestPage() {
               );
             })
           : stationOutgoing.map((trip) => {
-              const empty = emptySeats[trip.id] ?? 0;
+              const empty = emptySeats[trip.tripId] ?? 0;
               const paperTickets = Math.max(
                 0,
                 trip.capacity - trip.urugendoPassengers - empty,
@@ -482,25 +485,23 @@ export default function AgencyManifestPage() {
                         max={trip.capacity}
                         value={empty}
                         onChange={(e) => {
-                          const val = Number(e.target.value);
-                          const updated = {
-                            ...emptySeats,
-                            [trip.id]: val,
-                          };
-                          setEmptySeats(updated);
-                          localStorage.setItem(
-                            "urugendo_empty_seats",
-                            JSON.stringify(updated),
+                          const val = Math.min(
+                            trip.capacity,
+                            Math.max(0, Number(e.target.value)),
                           );
+                          setEmptySeats((prev) => ({
+                            ...prev,
+                            [trip.tripId]: val,
+                          }));
                         }}
                         className="w-16 bg-white border border-slate-300 rounded-lg py-1 px-2 text-center font-bold text-xs text-slate-800 focus:ring-2 focus:ring-[#00B14F] focus:outline-hidden"
                       />
                       <button
-                        onClick={() => handleSaveEmptySeats(trip.id)}
+                        onClick={() => handleSaveEmptySeats(trip.tripId)}
                         className="bg-[#00B14F] hover:bg-[#00B14F]/90 text-white p-2 rounded-lg text-xs font-bold flex items-center justify-center transition-colors cursor-pointer"
                         title="Save empty seats"
                       >
-                        {savedFeedback === trip.id ? (
+                        {savedFeedback === trip.tripId ? (
                           <CheckCircle2 size={15} className="text-white" />
                         ) : (
                           <Save size={15} />
@@ -508,7 +509,7 @@ export default function AgencyManifestPage() {
                       </button>
                     </div>
                   </div>
-                  {savedFeedback === trip.id && (
+                  {savedFeedback === trip.tripId && (
                     <p className="text-[11px] font-bold text-emerald-600 text-right">
                       ✓ Empty seat record saved successfully!
                     </p>

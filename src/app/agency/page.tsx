@@ -33,8 +33,10 @@ import {
   fetchBookingById,
   updateBookingStatus,
   updateTripStatus,
+  updateTripEmptySeats,
 } from "@/lib/api";
 import { fetchBranchRevenue } from "@/lib/branchService";
+import type { PeriodStats } from "@/lib/branchService";
 import { notifyPassengersOnTrip, notifyUser } from "@/lib/notificationsService";
 import {
   markPaymentVerified,
@@ -73,12 +75,14 @@ interface PendingMoMoPayment {
 
 interface ManifestTrip {
   id: string;
+  tripId: string;
   busPlate: string;
   driverName: string;
   from: string;
   to: string;
   time: string;
   capacity: number;
+  price: number;
   urugendoPassengers: number;
   status: string;
 }
@@ -117,10 +121,14 @@ export default function AgencyDashboard() {
   const [agentBranchId, setAgentBranchId] = useState<string | null>(null);
   const [, setOperatorId] = useState("");
   // Batch 2: real revenue loaded from the bookings table for the "today" stat card.
-  const [todayRevenueData, setTodayRevenueData] = useState<{
-    passengers: number;
-    revenue: number;
-  }>({ passengers: 0, revenue: 0 });
+  const [todayRevenueData, setTodayRevenueData] = useState<PeriodStats>({
+    passengers: 0,
+    revenue: 0,
+    urugendoPassengers: 0,
+    urugendoRevenue: 0,
+    paperPassengers: 0,
+    paperRevenue: 0,
+  });
 
   const [emptySeats, setEmptySeats] = useState<Record<string, number>>({});
   const [savedFeedback, setSavedFeedback] = useState<string | null>(null);
@@ -314,15 +322,6 @@ export default function AgencyDashboard() {
     setAgentBranch(branch);
     setOperatorId(opId);
 
-    const savedEmptySeats = localStorage.getItem("urugendo_empty_seats");
-    if (savedEmptySeats) {
-      try {
-        setEmptySeats(JSON.parse(savedEmptySeats));
-      } catch {
-        // ignore
-      }
-    }
-
     async function loadDashboardData() {
       setLoading(true);
       try {
@@ -360,7 +359,13 @@ export default function AgencyDashboard() {
         );
         setTrips(branchTrips);
         setBookings((branchBookingsRaw as ExtendedBooking[]) || []);
-        setTodayRevenueData(branchRevenue as any);
+        setTodayRevenueData(branchRevenue as PeriodStats);
+        // empty seats live on trips.empty_seats — the DB is the source of truth
+        setEmptySeats(
+          Object.fromEntries(
+            branchTrips.map((t: any) => [t.id, Number(t.emptySeats) || 0]),
+          ),
+        );
       } catch (error) {
         console.error("Failed to fetch agency dashboard data:", error);
       } finally {
@@ -614,12 +619,14 @@ export default function AgencyDashboard() {
     .filter((t) => cleanStationName(t.to || "").includes(currentStationKey))
     .map((t, idx) => ({
       id: `inc-${t.id || idx}`,
+      tripId: t.id,
       busPlate: t.plateNumber || "RAC 112D",
       driverName: t.driverName || "Station Driver",
       from: t.from,
       to: getBranchName(agentBranch),
       time: t.arrivalTime || t.departureTime,
       capacity: t.totalSeats || 29,
+      price: t.price || 0,
       urugendoPassengers: verifiedBookings.filter(
         (b) =>
           (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id &&
@@ -632,12 +639,14 @@ export default function AgencyDashboard() {
     .filter((t) => cleanStationName(t.from || "").includes(currentStationKey))
     .map((t, idx) => ({
       id: `out-${t.id || idx}`,
+      tripId: t.id,
       busPlate: t.plateNumber || "RAD 882D",
       driverName: t.driverName || "Station Driver",
       from: getBranchName(agentBranch),
       to: t.to,
       time: t.departureTime,
       capacity: t.totalSeats || 29,
+      price: t.price || 0,
       urugendoPassengers: verifiedBookings.filter(
         (b) =>
           (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id &&
@@ -647,8 +656,17 @@ export default function AgencyDashboard() {
       status: displayTripStatus(t),
     }));
 
-  const handleSaveEmptySeats = (tripId: string) => {
-    localStorage.setItem("urugendo_empty_seats", JSON.stringify(emptySeats));
+  const handleSaveEmptySeats = async (tripId: string) => {
+    const value = emptySeats[tripId] ?? 0;
+    const saved = await updateTripEmptySeats(tripId, value);
+    if (!saved) return;
+    setTrips((prev) =>
+      prev.map((t) => (t.id === tripId ? { ...t, emptySeats: value } : t)),
+    );
+    if (agentBranchId) {
+      const refreshed = await fetchBranchRevenue(agentBranchId, "today");
+      setTodayRevenueData(refreshed);
+    }
     setSavedFeedback(tripId);
     setTimeout(() => setSavedFeedback(null), 2500);
   };
@@ -711,7 +729,7 @@ export default function AgencyDashboard() {
           .join("")
       : activeList
           .map((trip, idx) => {
-            const empty = emptySeats[trip.id] ?? 0;
+            const empty = emptySeats[trip.tripId] ?? 0;
             const paperTickets = Math.max(
               0,
               trip.capacity - trip.urugendoPassengers - empty,
@@ -835,6 +853,10 @@ export default function AgencyDashboard() {
   const stats = {
     todayBookings: todayRevenueData.passengers,
     todayRevenue: todayRevenueData.revenue,
+    digitalBookings: todayRevenueData.urugendoPassengers ?? 0,
+    digitalRevenue: todayRevenueData.urugendoRevenue ?? 0,
+    paperBookings: todayRevenueData.paperPassengers ?? 0,
+    paperRevenue: todayRevenueData.paperRevenue ?? 0,
     totalBuses: new Set(trips.map((t) => t.plateNumber || t.id).filter(Boolean))
       .size,
     activeRoutes: new Set(
@@ -1265,9 +1287,11 @@ export default function AgencyDashboard() {
                 </span>
               </div>
               <div className="text-[20px] font-bold text-primary">
-                {stats.todayBookings}
+                {stats.digitalBookings}
               </div>
-              <div className="text-[9px] text-text-muted">Digital tickets</div>
+              <div className="text-[9px] text-text-muted">
+                {stats.digitalRevenue.toLocaleString()} RWF digital
+              </div>
             </div>
 
             <div className="bg-white rounded-xl p-3 border border-border shadow-sm">
@@ -1280,9 +1304,11 @@ export default function AgencyDashboard() {
                 </span>
               </div>
               <div className="text-[20px] font-bold text-amber-600">
-                Counter
+                {stats.paperBookings}
               </div>
-              <div className="text-[9px] text-text-muted">Manual bookings</div>
+              <div className="text-[9px] text-text-muted">
+                {stats.paperRevenue.toLocaleString()} RWF counter
+              </div>
             </div>
           </div>
 
@@ -1686,7 +1712,7 @@ export default function AgencyDashboard() {
                   );
                 })
               : stationOutgoing.map((trip) => {
-                  const empty = emptySeats[trip.id] ?? 0;
+                  const empty = emptySeats[trip.tripId] ?? 0;
                   const paperTickets = Math.max(
                     0,
                     trip.capacity - trip.urugendoPassengers - empty,
@@ -1764,7 +1790,7 @@ export default function AgencyDashboard() {
                             onChange={(e) =>
                               setEmptySeats((prev) => ({
                                 ...prev,
-                                [trip.id]: Math.min(
+                                [trip.tripId]: Math.min(
                                   trip.capacity,
                                   Math.max(0, Number(e.target.value)),
                                 ),
@@ -1773,11 +1799,11 @@ export default function AgencyDashboard() {
                             className="w-16 bg-[#ffffff] border border-slate-300 rounded-lg py-1 px-2 text-center font-bold text-xs text-slate-800 focus:ring-2 focus:ring-[#00B14F] focus:outline-none"
                           />
                           <button
-                            onClick={() => handleSaveEmptySeats(trip.id)}
+                            onClick={() => handleSaveEmptySeats(trip.tripId)}
                             className="bg-[#00B14F] hover:bg-[#00B14F]/90 text-white p-2 rounded-lg text-xs font-bold flex items-center justify-center transition-colors cursor-pointer"
                             title="Save empty seats"
                           >
-                            {savedFeedback === trip.id ? (
+                            {savedFeedback === trip.tripId ? (
                               <CheckCircle2 size={15} className="text-white" />
                             ) : (
                               <Save size={15} />
@@ -1785,7 +1811,7 @@ export default function AgencyDashboard() {
                           </button>
                         </div>
                       </div>
-                      {savedFeedback === trip.id && (
+                      {savedFeedback === trip.tripId && (
                         <p className="text-[11px] font-bold text-emerald-600 text-right">
                           ✓ Empty seat record saved successfully!
                         </p>

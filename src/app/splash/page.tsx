@@ -40,8 +40,15 @@ export default function SplashScreen() {
       <div className="relative z-10 flex flex-col justify-between h-full p-6 pb-10 text-white">
         <div className="flex justify-between items-center pt-4">
           <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center font-black text-white text-lg shadow-md">
-              U
+            <div className="w-9 h-9 rounded-xl bg-white/95 flex items-center justify-center shadow-md overflow-hidden">
+              <Image
+                src="/favicon.png"
+                alt="Urugendo"
+                width={28}
+                height={28}
+                priority
+                className="object-contain"
+              />
             </div>
             <span className="font-extrabold tracking-tight text-lg">
               Urugendo
@@ -94,9 +101,12 @@ export default function SplashScreen() {
               <ArrowRight size={18} />
             </button>
 
+          </div>
+
+          <div className="pt-4 text-center">
             <button
               onClick={() => router.push("/agency/agency-login")}
-              className="w-full h-11 bg-white/10 hover:bg-white/15 text-white/90 font-bold text-[13px] rounded-2xl backdrop-blur-md border border-white/15 transition-all cursor-pointer"
+              className="text-[11px] font-medium text-white/35 hover:text-white/60 underline underline-offset-4 decoration-white/20 transition-colors cursor-pointer"
             >
               {language === "RW"
                 ? "Injira nka Agent cyangwa Manager"

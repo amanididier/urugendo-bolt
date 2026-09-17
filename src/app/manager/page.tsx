@@ -226,6 +226,7 @@ export default function AgencyManagerApp() {
   const [periodStats, setPeriodStats] = useState<
     Record<string, PeriodStats>
   >({});
+  const [statsNonce, setStatsNonce] = useState(0);
 
   // ── Branch form state ────────────────────────────────────────────────
   const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
@@ -360,9 +361,15 @@ export default function AgencyManagerApp() {
       .subscribe();
     const chBookings = supabase
       .channel(`manager-bookings-${session?.agencyName ?? "all"}`)
-      .on("postgres_changes" as any, { event: "INSERT", schema: "public", table: "bookings" }, () => {
-        // Trigger revenue refresh without full reload — invalidate stats so periodStats reloads
-        // We do a light touch: nudge a state so the stats effect re-runs
+      .on("postgres_changes" as any, { event: "*", schema: "public", table: "bookings" }, () => {
+        setStatsNonce((n) => n + 1);
+      })
+      .subscribe();
+    // Agents recording empty seats changes the paper-ticket half of the math.
+    const chTrips = supabase
+      .channel(`manager-trips-${session?.agencyName ?? "all"}`)
+      .on("postgres_changes" as any, { event: "UPDATE", schema: "public", table: "trips" }, () => {
+        setStatsNonce((n) => n + 1);
       })
       .subscribe();
 
@@ -370,10 +377,11 @@ export default function AgencyManagerApp() {
       supabase.removeChannel(chAgents);
       supabase.removeChannel(chBranches);
       supabase.removeChannel(chBookings);
+      supabase.removeChannel(chTrips);
     };
   }, [checkingSession, loadData, showToast, session?.agencyName]);
 
-  // ── Revenue stats (re-fetch when branches or period changes) ───────
+  // ── Revenue stats (re-fetch when branches, period or live data change) ──
   const [statsLoading, setStatsLoading] = useState(false);
 
   useEffect(() => {
@@ -403,25 +411,36 @@ export default function AgencyManagerApp() {
     return () => {
       cancelled = true;
     };
-  }, [branches, selectedPeriod, checkingSession]);
+  }, [branches, selectedPeriod, checkingSession, statsNonce]);
 
   // ── Computed ───────────────────────────────────────────────────────
-  const branchStats = branches.map((b) => ({
-    branch: b,
-    stats: periodStats[b.id] ?? { passengers: 0, revenue: 0 },
-  }));
+  // The Overall / Urugendo / Paper switch projects every displayed figure
+  // onto the selected slice of the manifest math.
+  const categoryStats = (stats: PeriodStats) => {
+    if (revenueCategory === "urugendo")
+      return {
+        passengers: stats.urugendoPassengers ?? 0,
+        revenue: stats.urugendoRevenue ?? 0,
+      };
+    if (revenueCategory === "paper")
+      return {
+        passengers: stats.paperPassengers ?? 0,
+        revenue: stats.paperRevenue ?? 0,
+      };
+    return { passengers: stats.passengers, revenue: stats.revenue };
+  };
 
-  const totalPassengers = branchStats.reduce((acc, b) => {
-    if (revenueCategory === "urugendo") return acc + (b.stats.urugendoPassengers ?? b.stats.passengers);
-    if (revenueCategory === "paper") return acc + (b.stats.paperPassengers ?? 0);
-    return acc + b.stats.passengers;
-  }, 0);
+  const branchStats = branches.map((b) => {
+    const raw = periodStats[b.id] ?? { passengers: 0, revenue: 0 };
+    return { branch: b, stats: categoryStats(raw) };
+  });
 
-  const totalRevenue = branchStats.reduce((acc, b) => {
-    if (revenueCategory === "urugendo") return acc + (b.stats.urugendoRevenue ?? b.stats.revenue);
-    if (revenueCategory === "paper") return acc + (b.stats.paperRevenue ?? 0);
-    return acc + b.stats.revenue;
-  }, 0);
+  const totalPassengers = branchStats.reduce(
+    (acc, b) => acc + b.stats.passengers,
+    0,
+  );
+
+  const totalRevenue = branchStats.reduce((acc, b) => acc + b.stats.revenue, 0);
   const topBranch = [...branchStats].sort(
     (a, b) => b.stats.revenue - a.stats.revenue,
   )[0];
