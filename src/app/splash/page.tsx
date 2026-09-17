@@ -89,7 +89,7 @@ export default function SplashScreen() {
           <p className="text-[14px] text-white/80 leading-relaxed font-medium max-w-[320px]">
             {language === "RW"
               ? "Shakisha, gereranya kandi utegere bisi ku buryo bworoshye. Application yo gutegeraho bisi."
-              : "Search, compare, and book express bus tickets from Kigali to Musanze, Rubavu, and all intercity routes instantly."}
+              : "Search, compare, and book express bus tickets for all routes instantly."}
           </p>
 
           <div className="space-y-3 pt-2">
