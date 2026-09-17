@@ -80,57 +80,104 @@ export async function fetchAgencyBranches(agencyName?: string): Promise<BranchRe
   }
 }
 
-export async function fetchBranchRevenue(
-  branchId: string,
-  period: "today" | "monthly" | "yearly" = "today",
-  now: Date = new Date(),
-): Promise<PeriodStats> {
-  const start = new Date(now);
+const EMPTY_STATS: PeriodStats = {
+  passengers: 0,
+  revenue: 0,
+  urugendoPassengers: 0,
+  urugendoRevenue: 0,
+  paperPassengers: 0,
+  paperRevenue: 0,
+};
 
+/** Trips whose manifest is closed — paper tickets are only countable once the bus left. */
+const MANIFEST_CLOSED_STATUSES = ["departed", "arrived"];
+
+function periodStart(
+  period: "today" | "monthly" | "yearly",
+  now: Date,
+): Date {
+  const start = new Date(now);
   if (period === "today") {
     start.setHours(0, 0, 0, 0);
   } else if (period === "monthly") {
     start.setDate(1);
     start.setHours(0, 0, 0, 0);
-  } else if (period === "yearly") {
+  } else {
     start.setMonth(0, 1);
     start.setHours(0, 0, 0, 0);
   }
+  return start;
+}
+
+export async function fetchBranchRevenue(
+  branchId: string,
+  period: "today" | "monthly" | "yearly" = "today",
+  now: Date = new Date(),
+): Promise<PeriodStats> {
+  const start = periodStart(period, now);
+  const startDate = start.toISOString().split("T")[0];
 
   try {
-    const { data, error } = await supabase
-      .from("bookings")
-      .select("fare_amount, created_at, status, payment_status, is_paper_ticket")
-      .eq("branch_id", branchId)
-      .gte("created_at", start.toISOString())
-      .or("payment_status.eq.verified,status.eq.confirmed");
+    const [bookingsRes, tripsRes] = await Promise.all([
+      supabase
+        .from("bookings")
+        .select("trip_id, fare_amount, total_amount, created_at, status, payment_status")
+        .eq("branch_id", branchId)
+        .gte("created_at", start.toISOString())
+        .or("payment_status.eq.verified,status.eq.confirmed"),
+      supabase
+        .from("trips")
+        .select("id, price, total_seats, empty_seats, travel_date, status, origin_branch_id, branch_id")
+        .or(`origin_branch_id.eq.${branchId},branch_id.eq.${branchId}`)
+        .gte("travel_date", startDate)
+        .in("status", MANIFEST_CLOSED_STATUSES),
+    ]);
 
-    if (error || !data) {
-      return { passengers: 0, revenue: 0, urugendoPassengers: 0, urugendoRevenue: 0, paperPassengers: 0, paperRevenue: 0 };
+    if (bookingsRes.error) {
+      console.warn("[branchService] bookings revenue error:", bookingsRes.error.message);
+    }
+    if (tripsRes.error) {
+      console.warn("[branchService] trips manifest error:", tripsRes.error.message);
     }
 
-    const urugendoBookings = data.filter((b) => !b.is_paper_ticket);
-    const paperBookings = data.filter((b) => b.is_paper_ticket);
+    const bookings = bookingsRes.data ?? [];
 
-    const urugendoPassengers = urugendoBookings.length;
-    const urugendoRevenue = urugendoBookings.reduce((sum, item) => sum + (Number(item.fare_amount) || 0), 0);
+    const urugendoPassengers = bookings.length;
+    const urugendoRevenue = bookings.reduce(
+      (sum, b: any) => sum + (Number(b.fare_amount) || Number(b.total_amount) || 0),
+      0,
+    );
 
-    const paperPassengers = paperBookings.length;
-    const paperRevenue = paperBookings.reduce((sum, item) => sum + (Number(item.fare_amount) || 0), 0);
+    // Digital passengers per trip — needed to isolate paper tickets per manifest.
+    const digitalPerTrip = new Map<string, number>();
+    for (const b of bookings as any[]) {
+      if (!b.trip_id) continue;
+      digitalPerTrip.set(b.trip_id, (digitalPerTrip.get(b.trip_id) ?? 0) + 1);
+    }
 
-    const passengers = urugendoPassengers + paperPassengers;
-    const revenue = urugendoRevenue + paperRevenue;
+    let paperPassengers = 0;
+    let paperRevenue = 0;
+    for (const trip of (tripsRes.data ?? []) as any[]) {
+      const capacity = Number(trip.total_seats) || 0;
+      const empty = Number(trip.empty_seats) || 0;
+      const actual = Math.max(0, capacity - empty);
+      const digital = digitalPerTrip.get(trip.id) ?? 0;
+      const paper = Math.max(0, actual - digital);
+      paperPassengers += paper;
+      paperRevenue += paper * (Number(trip.price) || 0);
+    }
 
     return {
-      passengers,
-      revenue,
+      passengers: urugendoPassengers + paperPassengers,
+      revenue: urugendoRevenue + paperRevenue,
       urugendoPassengers,
       urugendoRevenue,
       paperPassengers,
       paperRevenue,
     };
-  } catch {
-    return { passengers: 0, revenue: 0, urugendoPassengers: 0, urugendoRevenue: 0, paperPassengers: 0, paperRevenue: 0 };
+  } catch (err) {
+    console.warn("[branchService] exception in fetchBranchRevenue:", err);
+    return { ...EMPTY_STATS };
   }
 }
 

@@ -59,7 +59,7 @@ export async function fetchTrips(
   try {
     let query = supabase.from("trips").select(`
       id, route_from, route_to, departure_time, arrival_time, duration, travel_date, date,
-      price, currency, total_seats, available_seats, bus_type, amenities, plate_number, status,
+      price, currency, total_seats, available_seats, empty_seats, bus_type, amenities, plate_number, status,
       origin_branch, origin_branch_id, branch_id,
       operator_id,
       operator:operators(id, name, emoji)
@@ -103,6 +103,7 @@ export async function fetchTrips(
         date: t.travel_date || t.date || new Date().toISOString().split("T")[0],
         plateNumber: t.plate_number || "RAD100B",
         status: t.status || "scheduled",
+        emptySeats: t.empty_seats ?? 0,
         // keep FKs for isolation / realtime dedup
         origin_branch_id: t.origin_branch_id,
         branch_id: t.branch_id,
@@ -160,6 +161,7 @@ export async function fetchTripById(id: string): Promise<Trip | null> {
         data.travel_date || data.date || new Date().toISOString().split("T")[0],
       plateNumber: data.plate_number || "RAD100B",
       status: data.status || "scheduled",
+      emptySeats: data.empty_seats ?? 0,
     };
   } catch (err) {
     console.error("Failed to fetch trip by ID:", err);
@@ -179,7 +181,7 @@ export async function fetchTripsByDate(date?: string, branchId?: string): Promis
     try {
       const { data, error } = await supabase
         .from("trips")
-        .select(`id, route_from, route_to, departure_time, arrival_time, duration, travel_date, date, price, currency, total_seats, available_seats, bus_type, amenities, plate_number, status, origin_branch, origin_branch_id, branch_id, operator_id, operator:operators(id, name, emoji)`)
+        .select(`id, route_from, route_to, departure_time, arrival_time, duration, travel_date, date, price, currency, total_seats, available_seats, empty_seats, bus_type, amenities, plate_number, status, origin_branch, origin_branch_id, branch_id, operator_id, operator:operators(id, name, emoji)`)
         .eq("travel_date", date || new Date().toISOString().split("T")[0])
         .or(`origin_branch_id.eq.${branchId},branch_id.eq.${branchId}`)
         .order("travel_date", { ascending: true })
@@ -197,6 +199,7 @@ export async function fetchTripsByDate(date?: string, branchId?: string): Promis
             busType: t.bus_type || "Coaster", amenities: t.amenities || ["WiFi", "AC"],
             date: t.travel_date || t.date || new Date().toISOString().split("T")[0],
             plateNumber: t.plate_number || "RAD100B", status: t.status || "scheduled",
+            emptySeats: t.empty_seats ?? 0,
             origin_branch_id: t.origin_branch_id, branch_id: t.branch_id,
           } as any;
         });
@@ -716,6 +719,29 @@ export async function updateTripStatus(
     return true;
   } catch (err) {
     console.error("Unexpected error updating trip:", err);
+    return false;
+  }
+}
+
+// Persist the agent-recorded empty seat count for a departed trip.
+export async function updateTripEmptySeats(
+  tripId: string,
+  emptySeats: number,
+): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from("trips")
+      .update({ empty_seats: Math.max(0, Math.round(emptySeats)) })
+      .eq("id", tripId);
+
+    if (error) {
+      console.error("Error updating trip empty seats:", error.message || error);
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    console.error("Unexpected error updating trip empty seats:", err);
     return false;
   }
 }
