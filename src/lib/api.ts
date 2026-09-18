@@ -209,6 +209,65 @@ export async function fetchTripsByDate(date?: string, branchId?: string): Promis
   return fetchTrips(undefined, undefined, date);
 }
 
+export async function fetchTripsForBranchRange(
+  branchId: string,
+  startDate: string,
+  endDate: string,
+): Promise<Trip[]> {
+  try {
+    const { data, error } = await supabase
+      .from("trips")
+      .select(
+        `id, route_from, route_to, departure_time, arrival_time, duration, travel_date, date, price, currency, total_seats, available_seats, empty_seats, bus_type, amenities, plate_number, status, origin_branch, origin_branch_id, branch_id, operator_id, operator:operators(id, name, emoji)`,
+      )
+      .or(`origin_branch_id.eq.${branchId},branch_id.eq.${branchId}`)
+      .gte("travel_date", startDate)
+      .lte("travel_date", endDate)
+      .order("travel_date", { ascending: true })
+      .limit(500);
+    if (error || !data) {
+      if (error) console.error("Error fetching trips range:", error.message || error);
+      return [];
+    }
+    return data.map((t: any) => {
+      const op = t.operator;
+      return {
+        id: t.id,
+        operator: {
+          id: op?.id || t.operator_id || "unknown",
+          name: op?.name || "Bus Operator",
+          logo: op?.logo || "🚌",
+          gradient: op?.gradient || "linear-gradient(135deg, #FF6B1A, #FF8800)",
+          emoji: op?.emoji || op?.logo || "🚌",
+          rating: 4.8,
+          totalReviews: 120,
+        },
+        from: t.route_from || t.from || "Kigali",
+        to: t.route_to || t.to || "Musanze",
+        departureTime: t.departure_time || "08:00",
+        arrivalTime: t.arrival_time || "10:00",
+        duration: t.duration || "2h 00m",
+        price: t.price || 2500,
+        currency: t.currency || "RWF",
+        availableSeats: t.available_seats ?? 36,
+        totalSeats: t.total_seats ?? 36,
+        busType: t.bus_type || "Coaster",
+        amenities: t.amenities || ["WiFi", "AC"],
+        date: t.travel_date || t.date || new Date().toISOString().split("T")[0],
+        plateNumber: t.plate_number || "RAD100B",
+        status: t.status || "scheduled",
+        emptySeats: t.empty_seats ?? 0,
+        origin_branch_id: t.origin_branch_id,
+        branch_id: t.branch_id,
+        driverName: t.driver_name || t.driverName,
+      } as any;
+    });
+  } catch (err) {
+    console.error("Failed to fetch trips range:", err);
+    return [];
+  }
+}
+
 // Fetch popular routes — optimized: single routes query, no full bookings scan (kills heavy 400+ row fetch on every home load)
 export async function fetchPopularRoutes(): Promise<Route[]> {
   try {
@@ -758,7 +817,8 @@ function formatBookingData(b: any): Booking {
     paymentTime: b.payment_time || b.created_at,
     seat: b.seat_id || b.seat_label || "1A",
     paymentMethod: "MTN Mobile Money",
-    totalAmount: b.trip?.price || 2500,
+    totalAmount: Number(b.fare_amount) || Number(b.total_amount) || b.trip?.price || 0,
+    createdAt: b.created_at,
     // Batch 4: expose status and payment_status for the verification workflow.
     // status: booking lifecycle (pending → confirmed → boarded / rejected).
     // payment_status: MoMo receipt state (submitted → verified / failed).

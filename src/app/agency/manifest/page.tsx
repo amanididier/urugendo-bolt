@@ -19,6 +19,13 @@ import {
 import { fetchTripsByDate, updateTripEmptySeats } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import type { AgencyBranch, Trip } from "@/lib/types";
+import { getRwandaToday } from "@/lib/dateUtils";
+import {
+  bookingTripId,
+  computePaperPassengers,
+  hasTripDeparted,
+  isVerifiedDigitalBooking,
+} from "@/lib/manifestMath";
 
 interface ManifestTrip {
   id: string;
@@ -73,13 +80,13 @@ export default function AgencyManifestPage() {
           const { data: ar } = await supabase.from("agency_agents").select("branch_id").eq("email", em).maybeSingle();
           branchId = (ar as any)?.branch_id || null;
         }
-        const todayStr = new Date().toISOString().split("T")[0];
+        const todayStr = getRwandaToday();
         const todayTrips = await fetchTripsByDate(todayStr, branchId || undefined);
         // Trips are already branch-scoped; derive relevant bookings from their ids (no cross-branch leakage)
         const tripIds = new Set((todayTrips || []).map((t: any) => t.id));
         let filteredBookings: any[] = [];
         if (branchId) {
-          const { data } = await supabase.from("bookings").select("id,trip_id,status,branch_id").eq("branch_id", branchId);
+          const { data } = await supabase.from("bookings").select("id,trip_id,status,payment_status,branch_id").eq("branch_id", branchId);
           filteredBookings = (data || []).filter((b: any) => tripIds.has(b.trip_id));
         }
         setTrips(todayTrips || []);
@@ -119,9 +126,7 @@ export default function AgencyManifestPage() {
       time: t.arrivalTime || t.departureTime,
       capacity: t.totalSeats || 29,
       urugendoPassengers: bookings.filter(
-        (b) =>
-          (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id &&
-          b.status !== "cancelled",
+        (b) => bookingTripId(b) === t.id && isVerifiedDigitalBooking(b),
       ).length,
       status: t.status || "In Transit",
     }));
@@ -138,9 +143,7 @@ export default function AgencyManifestPage() {
       time: t.departureTime,
       capacity: t.totalSeats || 29,
       urugendoPassengers: bookings.filter(
-        (b) =>
-          (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id &&
-          b.status !== "cancelled",
+        (b) => bookingTripId(b) === t.id && isVerifiedDigitalBooking(b),
       ).length,
       status: t.status || "Scheduled",
     }));
@@ -148,6 +151,11 @@ export default function AgencyManifestPage() {
   const handleSaveEmptySeats = async (tripId: string) => {
     const saved = await updateTripEmptySeats(tripId, emptySeats[tripId] ?? 0);
     if (!saved) return;
+    setTrips((prev) =>
+      prev.map((t) =>
+        t.id === tripId ? { ...t, emptySeats: emptySeats[tripId] ?? 0 } : t,
+      ),
+    );
     setSavedFeedback(tripId);
     setTimeout(() => setSavedFeedback(null), 2500);
   };
@@ -188,9 +196,11 @@ export default function AgencyManifestPage() {
     const tableRows = isIncoming
       ? activeList
           .map((trip) => {
-            const paperTickets = Math.max(
-              0,
-              trip.capacity - trip.urugendoPassengers,
+            const paperTickets = computePaperPassengers(
+              trip.capacity,
+              emptySeats[trip.tripId] ?? 0,
+              trip.urugendoPassengers,
+              true,
             );
             return `
             <tr>
@@ -210,9 +220,14 @@ export default function AgencyManifestPage() {
       : activeList
           .map((trip) => {
             const empty = emptySeats[trip.tripId] ?? 0;
-            const paperTickets = Math.max(
-              0,
-              trip.capacity - trip.urugendoPassengers - empty,
+            const sourceTrip = trips.find((t) => t.id === trip.tripId);
+            const paperTickets = computePaperPassengers(
+              trip.capacity,
+              empty,
+              trip.urugendoPassengers,
+              sourceTrip
+                ? hasTripDeparted(sourceTrip.date, sourceTrip.departureTime)
+                : true,
             );
             const totalOnboard = trip.urugendoPassengers + paperTickets;
             return `
@@ -354,9 +369,11 @@ export default function AgencyManifestPage() {
       <div className="p-4 max-w-2xl mx-auto space-y-3">
         {activeTab === "incoming"
           ? stationIncoming.map((trip) => {
-              const paperTickets = Math.max(
-                0,
-                trip.capacity - trip.urugendoPassengers,
+              const paperTickets = computePaperPassengers(
+                trip.capacity,
+                emptySeats[trip.tripId] ?? 0,
+                trip.urugendoPassengers,
+                true,
               );
               return (
                 <div
@@ -414,9 +431,14 @@ export default function AgencyManifestPage() {
             })
           : stationOutgoing.map((trip) => {
               const empty = emptySeats[trip.tripId] ?? 0;
-              const paperTickets = Math.max(
-                0,
-                trip.capacity - trip.urugendoPassengers - empty,
+              const sourceTrip = trips.find((t) => t.id === trip.tripId);
+              const paperTickets = computePaperPassengers(
+                trip.capacity,
+                empty,
+                trip.urugendoPassengers,
+                sourceTrip
+                  ? hasTripDeparted(sourceTrip.date, sourceTrip.departureTime)
+                  : true,
               );
 
               return (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { useApp } from "@/context/app-context";
@@ -12,11 +12,46 @@ export default function SplashScreen() {
   const router = useRouter();
   const { language, setLanguage, setUserRole } = useApp();
 
+  // PWA Install Prompt state
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+
   const continueAsPassenger = () => {
     if (typeof window !== "undefined")
       localStorage.setItem("urugendo_role", "passenger");
     setUserRole("passenger");
     router.push("/home");
+  };
+
+  // Listen for the beforeinstallprompt event
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e as any);
+      setShowInstallBanner(true);
+    };
+
+    const handleAppInstalled = () => {
+      setShowInstallBanner(false);
+    };
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleAppInstalled);
+
+    // Cleanup on unmount
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`User ${outcome} installing app`);
+    setDeferredPrompt(null);
+    setShowInstallBanner(false);
   };
 
   return (
@@ -102,6 +137,52 @@ export default function SplashScreen() {
             </button>
 
           </div>
+
+          {/* PWA Install Banner - appears at the bottom after the language selector */}
+          {showInstallBanner && deferredPrompt && (
+            <div
+              className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-primary/90 backdrop-blur-md border border-primary/30 rounded-xl p-5 shadow-lg max-w-md w-full z-50"
+              style={{
+                animation: "slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards",
+              }}
+            >
+              <style>{`
+                @keyframes slideUp {
+                  from {
+                    opacity: 0;
+                    transform: translateY(20px);
+                  }
+                  to {
+                    opacity: 1;
+                    transform: translateY(0);
+                  }
+                }
+              `}</style>
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                  <ArrowRight size={24} className="text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-white">
+                    {language === "RW"
+                      ? "Tegere urugendo rwacu mu hejuru y'umuryango"
+                      : "Install Urugendo on your home screen"}
+                  </p>
+                  <p className="text-white/80 text-sm mt-0.5">
+                    {language === "RW"
+                      ? "Komeza kugera bisi mu giciro cy'umuryango kugera bisi mu buryo bwo gusohoka."
+                      : "Get instant access to all routes from your home screen."}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleInstallApp}
+                className="mt-3 w-full bg-primary text-white font-bold py-2 rounded-xl hover:bg-primary/90 transition-colors cursor-pointer"
+              >
+                {language === "RW" ? "Gura ubwiyunge" : "Install App"}
+              </button>
+            </div>
+          )}
 
           <div className="pt-4 text-center">
             <button

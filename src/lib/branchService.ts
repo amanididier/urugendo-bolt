@@ -1,4 +1,11 @@
 import { supabase } from "@/lib/supabase";
+import { getRwandaToday } from "@/lib/dateUtils";
+import {
+  computePaperPassengers,
+  computePaperRevenue,
+  hasTripDeparted,
+  isVerifiedDigitalBooking,
+} from "@/lib/manifestMath";
 
 export interface PeriodStats {
   passengers: number;
@@ -89,24 +96,20 @@ const EMPTY_STATS: PeriodStats = {
   paperRevenue: 0,
 };
 
-/** Trips whose manifest is closed — paper tickets are only countable once the bus left. */
-const MANIFEST_CLOSED_STATUSES = ["departed", "arrived"];
-
-function periodStart(
+function periodDateRange(
   period: "today" | "monthly" | "yearly",
   now: Date,
-): Date {
-  const start = new Date(now);
-  if (period === "today") {
-    start.setHours(0, 0, 0, 0);
-  } else if (period === "monthly") {
-    start.setDate(1);
-    start.setHours(0, 0, 0, 0);
-  } else {
-    start.setMonth(0, 1);
-    start.setHours(0, 0, 0, 0);
+): { startDate: string; endDate: string } {
+  const today = getRwandaToday(now);
+  const [y, m] = today.split("-").map(Number);
+  if (period === "today") return { startDate: today, endDate: today };
+  if (period === "monthly") {
+    const startDate = `${y}-${String(m).padStart(2, "0")}-01`;
+    const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const endDate = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+    return { startDate, endDate };
   }
-  return start;
+  return { startDate: `${y}-01-01`, endDate: `${y}-12-31` };
 }
 
 export async function fetchBranchRevenue(
@@ -114,57 +117,60 @@ export async function fetchBranchRevenue(
   period: "today" | "monthly" | "yearly" = "today",
   now: Date = new Date(),
 ): Promise<PeriodStats> {
-  const start = periodStart(period, now);
-  const startDate = start.toISOString().split("T")[0];
+  const { startDate, endDate } = periodDateRange(period, now);
 
   try {
-    const [bookingsRes, tripsRes] = await Promise.all([
-      supabase
-        .from("bookings")
-        .select("trip_id, fare_amount, total_amount, created_at, status, payment_status")
-        .eq("branch_id", branchId)
-        .gte("created_at", start.toISOString())
-        .or("payment_status.eq.verified,status.eq.confirmed"),
-      supabase
-        .from("trips")
-        .select("id, price, total_seats, empty_seats, travel_date, status, origin_branch_id, branch_id")
-        .or(`origin_branch_id.eq.${branchId},branch_id.eq.${branchId}`)
-        .gte("travel_date", startDate)
-        .in("status", MANIFEST_CLOSED_STATUSES),
-    ]);
+    const tripsRes = await supabase
+      .from("trips")
+      .select(
+        "id, price, total_seats, empty_seats, travel_date, departure_time, status, origin_branch_id, branch_id",
+      )
+      .or(`origin_branch_id.eq.${branchId},branch_id.eq.${branchId}`)
+      .gte("travel_date", startDate)
+      .lte("travel_date", endDate);
 
-    if (bookingsRes.error) {
-      console.warn("[branchService] bookings revenue error:", bookingsRes.error.message);
-    }
     if (tripsRes.error) {
       console.warn("[branchService] trips manifest error:", tripsRes.error.message);
     }
 
-    const bookings = bookingsRes.data ?? [];
+    const trips = (tripsRes.data ?? []) as any[];
+    const tripIds = trips.map((t) => t.id).filter(Boolean);
 
-    const urugendoPassengers = bookings.length;
-    const urugendoRevenue = bookings.reduce(
-      (sum, b: any) => sum + (Number(b.fare_amount) || Number(b.total_amount) || 0),
-      0,
-    );
+    let bookings: any[] = [];
+    if (tripIds.length > 0) {
+      const bookingsRes = await supabase
+        .from("bookings")
+        .select("trip_id, fare_amount, total_amount, status, payment_status")
+        .in("trip_id", tripIds);
+      if (bookingsRes.error) {
+        console.warn("[branchService] bookings revenue error:", bookingsRes.error.message);
+      }
+      bookings = (bookingsRes.data ?? []).filter(isVerifiedDigitalBooking);
+    }
 
-    // Digital passengers per trip — needed to isolate paper tickets per manifest.
     const digitalPerTrip = new Map<string, number>();
-    for (const b of bookings as any[]) {
+    let urugendoPassengers = 0;
+    let urugendoRevenue = 0;
+    for (const b of bookings) {
+      urugendoPassengers += 1;
+      urugendoRevenue += Number(b.fare_amount) || Number(b.total_amount) || 0;
       if (!b.trip_id) continue;
       digitalPerTrip.set(b.trip_id, (digitalPerTrip.get(b.trip_id) ?? 0) + 1);
     }
 
     let paperPassengers = 0;
     let paperRevenue = 0;
-    for (const trip of (tripsRes.data ?? []) as any[]) {
-      const capacity = Number(trip.total_seats) || 0;
-      const empty = Number(trip.empty_seats) || 0;
-      const actual = Math.max(0, capacity - empty);
+    for (const trip of trips) {
+      const departed = hasTripDeparted(trip.travel_date, trip.departure_time, now);
       const digital = digitalPerTrip.get(trip.id) ?? 0;
-      const paper = Math.max(0, actual - digital);
+      const paper = computePaperPassengers(
+        Number(trip.total_seats) || 0,
+        Number(trip.empty_seats) || 0,
+        digital,
+        departed,
+      );
       paperPassengers += paper;
-      paperRevenue += paper * (Number(trip.price) || 0);
+      paperRevenue += computePaperRevenue(paper, Number(trip.price) || 0);
     }
 
     return {

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -37,6 +37,13 @@ import {
 } from "@/lib/api";
 import { fetchBranchRevenue } from "@/lib/branchService";
 import type { PeriodStats } from "@/lib/branchService";
+import { getRwandaToday } from "@/lib/dateUtils";
+import {
+  bookingTripId,
+  computePaperPassengers,
+  hasTripDeparted,
+  isVerifiedDigitalBooking,
+} from "@/lib/manifestMath";
 import { notifyPassengersOnTrip, notifyUser } from "@/lib/notificationsService";
 import {
   markPaymentVerified,
@@ -338,7 +345,7 @@ export default function AgencyDashboard() {
           resolvedBranchId = (agentRow as any)?.branch_id ?? null;
         }
 
-        const todayStr = new Date().toISOString().split("T")[0];
+        const todayStr = getRwandaToday();
         const [todayTrips, branchRevenue, branchBookingsRaw] =
           await Promise.all([
             fetchTripsByDate(todayStr, resolvedBranchId || undefined),
@@ -380,6 +387,22 @@ export default function AgencyDashboard() {
     };
   }, []);
 
+  const revenueRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const scheduleRevenueRefresh = useCallback((branchId: string) => {
+    if (revenueRefreshTimer.current) clearTimeout(revenueRefreshTimer.current);
+    revenueRefreshTimer.current = setTimeout(() => {
+      void fetchBranchRevenue(branchId, "today").then(setTodayRevenueData);
+    }, 250);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (revenueRefreshTimer.current) clearTimeout(revenueRefreshTimer.current);
+    };
+  }, []);
+
   // Live realtime: bookings + trips for this branch (no refresh needed)
   useEffect(() => {
     if (!agentBranchId) return;
@@ -399,6 +422,13 @@ export default function AgencyDashboard() {
         },
         (payload: any) => {
           const row = payload.new;
+          if (payload.eventType === "DELETE") {
+            setBookings((prev) =>
+              prev.filter((b) => b.id !== payload.old?.id),
+            );
+            scheduleRevenueRefresh(agentBranchId);
+            return;
+          }
           if (!row) return;
           // ---> ADD THIS NATIVE NOTIFICATION TRIGGER <---
           if (
@@ -443,6 +473,7 @@ export default function AgencyDashboard() {
               return prev.filter((b) => b.id !== (payload.old?.id ?? row.id));
             return prev;
           });
+          scheduleRevenueRefresh(agentBranchId);
         },
       )
       .subscribe();
@@ -454,6 +485,7 @@ export default function AgencyDashboard() {
         (payload: any) => {
           const row = payload.new;
           const oldRow = payload.old;
+          scheduleRevenueRefresh(agentBranchId);
           // Only care about trips for this agent's branch
           const matches = row
             ? row.origin_branch_id === agentBranchId ||
@@ -465,10 +497,7 @@ export default function AgencyDashboard() {
             : false;
           if (payload.eventType === "INSERT" && matches) {
             // Trigger a light reload of trips (keeps operator join correct) — cheap, no bookings reload
-            fetchTripsByDate(
-              new Date().toISOString().split("T")[0],
-              agentBranchId,
-            ).then((all) => {
+            fetchTripsByDate(getRwandaToday(), agentBranchId).then((all) => {
               setTrips((prev) => {
                 const filtered = all.filter(
                   (t: any) =>
@@ -492,10 +521,26 @@ export default function AgencyDashboard() {
                       status: row.status,
                       departureTime: row.departure_time ?? t.departureTime,
                       arrivalTime: row.arrival_time ?? t.arrivalTime,
+                      emptySeats:
+                        row.empty_seats != null
+                          ? Number(row.empty_seats)
+                          : t.emptySeats,
+                      totalSeats:
+                        row.total_seats != null
+                          ? Number(row.total_seats)
+                          : t.totalSeats,
+                      price:
+                        row.price != null ? Number(row.price) : t.price,
                     }
                   : t,
               ),
             );
+            if (row.empty_seats != null) {
+              setEmptySeats((prev) => ({
+                ...prev,
+                [row.id]: Number(row.empty_seats) || 0,
+              }));
+            }
           }
           if (payload.eventType === "DELETE" && oldMatches) {
             setTrips((prev) => prev.filter((t) => t.id !== oldRow.id));
@@ -507,26 +552,13 @@ export default function AgencyDashboard() {
       sb.removeChannel(chBookings);
       sb.removeChannel(chTrips);
     };
-  }, [agentBranchId, agentBranch]);
+  }, [agentBranchId, agentBranch, scheduleRevenueRefresh]);
 
   const currentStationKey = cleanStationName(agentBranch);
 
-  const verifiedBookings = bookings.filter(
-    (b) =>
-      b.status === "confirmed" ||
-      (b as any).payment_status === "verified" ||
-      b.status === "boarded",
-  );
-  const isTripDeparted = (trip: Trip) => {
-    try {
-      const d = (trip as any).date || new Date().toISOString().split("T")[0];
-      const tm = trip.departureTime || "08:00";
-      const dt = new Date(`${d}T${tm}`);
-      return !isNaN(dt.getTime()) && Date.now() >= dt.getTime();
-    } catch {
-      return false;
-    }
-  };
+  const verifiedBookings = bookings.filter(isVerifiedDigitalBooking);
+  const isTripDeparted = (trip: Trip) =>
+    hasTripDeparted((trip as any).date, trip.departureTime);
   const displayTripStatus = (trip: Trip) => {
     if (trip.status === "delayed") return "delayed";
     if (trip.status === "cancelled") return "cancelled";
@@ -628,10 +660,7 @@ export default function AgencyDashboard() {
       capacity: t.totalSeats || 29,
       price: t.price || 0,
       urugendoPassengers: verifiedBookings.filter(
-        (b) =>
-          (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id &&
-          b.status !== "cancelled" &&
-          b.status !== "rejected",
+        (b) => bookingTripId(b) === t.id,
       ).length,
       status: t.status || "In Transit",
     }));
@@ -648,10 +677,7 @@ export default function AgencyDashboard() {
       capacity: t.totalSeats || 29,
       price: t.price || 0,
       urugendoPassengers: verifiedBookings.filter(
-        (b) =>
-          (typeof b.trip === "object" ? b.trip?.id : b.trip) === t.id &&
-          b.status !== "cancelled" &&
-          b.status !== "rejected",
+        (b) => bookingTripId(b) === t.id,
       ).length,
       status: displayTripStatus(t),
     }));
@@ -707,9 +733,11 @@ export default function AgencyDashboard() {
     const tableRows = isIncoming
       ? activeList
           .map((trip, idx) => {
-            const paperTickets = Math.max(
-              0,
-              trip.capacity - trip.urugendoPassengers,
+            const paperTickets = computePaperPassengers(
+              trip.capacity,
+              emptySeats[trip.tripId] ?? 0,
+              trip.urugendoPassengers,
+              true,
             );
             const bg = idx % 2 === 0 ? "#FFFFFF" : "#F8FAFC";
             return `
@@ -730,9 +758,12 @@ export default function AgencyDashboard() {
       : activeList
           .map((trip, idx) => {
             const empty = emptySeats[trip.tripId] ?? 0;
-            const paperTickets = Math.max(
-              0,
-              trip.capacity - trip.urugendoPassengers - empty,
+            const sourceTrip = trips.find((t) => t.id === trip.tripId);
+            const paperTickets = computePaperPassengers(
+              trip.capacity,
+              empty,
+              trip.urugendoPassengers,
+              sourceTrip ? isTripDeparted(sourceTrip) : trip.status !== "pending",
             );
             const totalOnboard = trip.urugendoPassengers + paperTickets;
             const bg = idx % 2 === 0 ? "#FFFFFF" : "#F8FAFC";
@@ -1653,9 +1684,11 @@ export default function AgencyDashboard() {
           <div className="space-y-3">
             {manifestSubTab === "incoming"
               ? stationIncoming.map((trip) => {
-                  const paperTickets = Math.max(
-                    0,
-                    trip.capacity - trip.urugendoPassengers,
+                  const paperTickets = computePaperPassengers(
+                    trip.capacity,
+                    emptySeats[trip.tripId] ?? 0,
+                    trip.urugendoPassengers,
+                    true,
                   );
                   return (
                     <div
@@ -1713,9 +1746,14 @@ export default function AgencyDashboard() {
                 })
               : stationOutgoing.map((trip) => {
                   const empty = emptySeats[trip.tripId] ?? 0;
-                  const paperTickets = Math.max(
-                    0,
-                    trip.capacity - trip.urugendoPassengers - empty,
+                  const sourceTrip = trips.find((t) => t.id === trip.tripId);
+                  const paperTickets = computePaperPassengers(
+                    trip.capacity,
+                    empty,
+                    trip.urugendoPassengers,
+                    sourceTrip
+                      ? isTripDeparted(sourceTrip)
+                      : trip.status !== "pending",
                   );
 
                   return (
