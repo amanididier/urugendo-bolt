@@ -107,6 +107,7 @@ export default function AgencyDashboard() {
   const router = useRouter();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [bookings, setBookings] = useState<ExtendedBooking[]>([]);
+  const [manifestBookings, setManifestBookings] = useState<ExtendedBooking[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"today" | "verify" | "manifest">(
     "today",
@@ -347,26 +348,35 @@ export default function AgencyDashboard() {
 
         const todayStr = getRwandaToday();
         const [todayTrips, branchRevenue, branchBookingsRaw] =
-          await Promise.all([
-            fetchTripsByDate(todayStr, resolvedBranchId || undefined),
-            resolvedBranchId
-              ? fetchBranchRevenue(resolvedBranchId, "today")
-              : Promise.resolve({ passengers: 0, revenue: 0 }),
-            resolvedBranchId
-              ? fetchBookingsByBranch(resolvedBranchId)
-              : Promise.resolve([] as any),
-          ]);
-
-        if (!isMounted) return;
-        setAgentBranchId(resolvedBranchId);
-        const branchTrips = (todayTrips || []).filter(
-          (t: any) =>
-            t.origin_branch_id === resolvedBranchId ||
-            t.branch_id === resolvedBranchId,
-        );
-        setTrips(branchTrips);
-        setBookings((branchBookingsRaw as ExtendedBooking[]) || []);
-        setTodayRevenueData(branchRevenue as PeriodStats);
+                  await Promise.all([
+                    fetchTripsByDate(todayStr, resolvedBranchId || undefined),
+                    resolvedBranchId
+                      ? fetchBranchRevenue(resolvedBranchId, "today")
+                      : Promise.resolve({ passengers: 0, revenue: 0 }),
+                    resolvedBranchId
+                      ? fetchBookingsByBranch(resolvedBranchId)
+                      : Promise.resolve([] as any),
+                  ]);
+        
+                if (!isMounted) return;
+                setAgentBranchId(resolvedBranchId);
+                const branchTrips = (todayTrips || []).filter(
+                  (t: any) =>
+                    t.origin_branch_id === resolvedBranchId ||
+                    t.branch_id === resolvedBranchId,
+                );
+                setTrips(branchTrips);
+                setBookings((branchBookingsRaw as ExtendedBooking[]) || []);
+                // Fetch all bookings for these trips (not branch-scoped) for manifest passenger counts
+                const tripIds = new Set((branchTrips || []).map((t: any) => t.id));
+                if (tripIds.size > 0) {
+                  const { data: allBookings } = await supabase
+                    .from("bookings")
+                    .select("id,trip_id,status,payment_status,branch_id,passenger_name,passenger_phone,momo_name,momo_number,booking_code,short_code,seat_label,seat_id,fare_amount,total_amount,created_at,user_id")
+                    .in("trip_id", [...tripIds]);
+                  setManifestBookings((allBookings as ExtendedBooking[]) || []);
+                }
+                setTodayRevenueData(branchRevenue as PeriodStats);
         // empty seats live on trips.empty_seats — the DB is the source of truth
         setEmptySeats(
           Object.fromEntries(
@@ -556,7 +566,7 @@ export default function AgencyDashboard() {
 
   const currentStationKey = cleanStationName(agentBranch);
 
-  const verifiedBookings = bookings.filter(isVerifiedDigitalBooking);
+  const verifiedBookings = manifestBookings.filter(isVerifiedDigitalBooking);
   const isTripDeparted = (trip: Trip) =>
     hasTripDeparted((trip as any).date, trip.departureTime);
   const displayTripStatus = (trip: Trip) => {

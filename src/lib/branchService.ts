@@ -121,13 +121,14 @@ export async function fetchBranchRevenue(
 
   try {
     const tripsRes = await supabase
-      .from("trips")
-      .select(
-        "id, price, total_seats, empty_seats, travel_date, departure_time, status, origin_branch_id, branch_id",
-      )
-      .or(`origin_branch_id.eq.${branchId},branch_id.eq.${branchId}`)
-      .gte("travel_date", startDate)
-      .lte("travel_date", endDate);
+          .from("trips")
+          .select(
+            "id, price, total_seats, empty_seats, travel_date, departure_time, status, origin_branch_id, branch_id",
+          )
+          .or(`origin_branch_id.eq.${branchId},branch_id.eq.${branchId}`)
+          .gte("travel_date", startDate)
+          .lte("travel_date", endDate)
+          .neq("status", "cancelled");
 
     if (tripsRes.error) {
       console.warn("[branchService] trips manifest error:", tripsRes.error.message);

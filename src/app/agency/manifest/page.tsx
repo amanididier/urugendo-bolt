@@ -85,9 +85,12 @@ export default function AgencyManifestPage() {
         // Trips are already branch-scoped; derive relevant bookings from their ids (no cross-branch leakage)
         const tripIds = new Set((todayTrips || []).map((t: any) => t.id));
         let filteredBookings: any[] = [];
-        if (branchId) {
-          const { data } = await supabase.from("bookings").select("id,trip_id,status,payment_status,branch_id").eq("branch_id", branchId);
-          filteredBookings = (data || []).filter((b: any) => tripIds.has(b.trip_id));
+        if (tripIds.size > 0) {
+          const { data } = await supabase
+            .from("bookings")
+            .select("id,trip_id,status,payment_status,branch_id")
+            .in("trip_id", [...tripIds]);
+          filteredBookings = (data || []) || [];
         }
         setTrips(todayTrips || []);
         setBookings(filteredBookings || []);
