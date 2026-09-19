@@ -15,9 +15,20 @@ import {
   Search,
   ChevronRight,
 } from "lucide-react";
-import { fetchBookingsByBranch, fetchTripsByDate } from "@/lib/api";
+import {
+  fetchBookingsByBranch,
+  fetchTripsByDate,
+  fetchTripsForBranchRange,
+  resolveAgentBranchContext,
+} from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import type { Booking, Trip, AgencyBranch } from "@/lib/types";
+import {
+  bookingTripId,
+  computePaperPassengers,
+  hasTripDeparted,
+  isVerifiedDigitalBooking,
+} from "@/lib/manifestMath";
 
 interface ManifestRow {
   id: string;
@@ -29,64 +40,16 @@ interface ManifestRow {
   busPlate: string;
   emptySeats: number;
   urugendoPassengers: number;
+  paperPassengers: number;
   totalPassengers: number;
   branch: AgencyBranch;
+  capacity: number;
+  priceRwf: number;
+  paperRevenue: number;
+  digitalRevenue: number;
 }
 
-const SAMPLE_MANIFEST_DATA: ManifestRow[] = [
-  {
-    id: "man-1",
-    date: new Date().toISOString().split("T")[0],
-    departureTime: "08:00 AM",
-    arrivalTime: "10:30 AM",
-    trip: "Musanze → Kigali",
-    driverName: "Habimana Eric",
-    busPlate: "RAD 100B",
-    emptySeats: 2,
-    urugendoPassengers: 18,
-    totalPassengers: 27,
-    branch: "Musanze",
-  },
-  {
-    id: "man-2",
-    date: new Date().toISOString().split("T")[0],
-    departureTime: "10:30 AM",
-    arrivalTime: "01:00 PM",
-    trip: "Musanze → Rubavu",
-    driverName: "Ndayisaba Jean",
-    busPlate: "RAE 204A",
-    emptySeats: 0,
-    urugendoPassengers: 22,
-    totalPassengers: 29,
-    branch: "Musanze",
-  },
-  {
-    id: "man-3",
-    date: new Date().toISOString().split("T")[0],
-    departureTime: "01:15 PM",
-    arrivalTime: "03:45 PM",
-    trip: "Musanze → Kigali",
-    driverName: "Kamali Patrick",
-    busPlate: "RAC 405C",
-    emptySeats: 4,
-    urugendoPassengers: 15,
-    totalPassengers: 25,
-    branch: "Musanze",
-  },
-  {
-    id: "man-4",
-    date: new Date().toISOString().split("T")[0],
-    departureTime: "04:00 PM",
-    arrivalTime: "06:30 PM",
-    trip: "Kigali → Musanze",
-    driverName: "Mugisha Francois",
-    busPlate: "RAD 882D",
-    emptySeats: 1,
-    urugendoPassengers: 20,
-    totalPassengers: 28,
-    branch: "Kigali",
-  },
-];
+
 
 const BRANCHES: AgencyBranch[] = [
   "Musanze",
@@ -112,6 +75,8 @@ export default function AgencyReportsPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
+  const [manifestTrips, setManifestTrips] = useState<Trip[]>([]);
+  const [manifestBookings, setManifestBookings] = useState<any[]>([]);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -131,25 +96,60 @@ export default function AgencyReportsPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const em = localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email");
-      let branchId: string | null = null;
-      if (em) {
-        const { data: ar } = await supabase.from("agency_agents").select("branch_id").eq("email", em).maybeSingle();
-        branchId = (ar as any)?.branch_id || null;
+      // ── SOURCE OF TRUTH: branches table resolver ───────────────
+      const ctx = await resolveAgentBranchContext();
+      let branchId: string | null = ctx.matched ? ctx.branchId : null;
+      if (!branchId) {
+        const cached = localStorage.getItem("urugendo_branch_id");
+        if (cached) branchId = cached;
       }
-      if (!branchId) { setBookings([]); setTrips([]); setLoading(false); return; }
-      const [branchBookings, todayTrips] = await Promise.all([
+      if (!branchId) {
+        const em = localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email");
+        if (em) {
+          const { data: ar } = await supabase.from("agency_agents").select("branch_id").eq("email", em).maybeSingle();
+          branchId = (ar as any)?.branch_id || null;
+        }
+      }
+      if (!branchId) { setBookings([]); setTrips([]); setManifestTrips([]); setManifestBookings([]); setLoading(false); return; }
+
+      const baseDate = new Date(selectedDate);
+      const y = baseDate.getUTCFullYear();
+      const m = baseDate.getUTCMonth();
+      let rangeStart = selectedDate;
+      let rangeEnd = selectedDate;
+      if (filterPeriod === "month") {
+        rangeStart = `${y}-${String(m + 1).padStart(2, "0")}-01`;
+        const lastDay = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+        rangeEnd = `${y}-${String(m + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+      } else if (filterPeriod === "year") {
+        rangeStart = `${y}-01-01`;
+        rangeEnd = `${y}-12-31`;
+      }
+
+      const [branchBookings, todayTrips, rangeTrips] = await Promise.all([
         fetchBookingsByBranch(branchId),
         fetchTripsByDate(selectedDate, branchId),
+        fetchTripsForBranchRange(branchId, rangeStart, rangeEnd),
       ]);
       setBookings(branchBookings || []);
       setTrips(todayTrips || []);
+      setManifestTrips(rangeTrips || []);
+      const tripIds = new Set((rangeTrips || []).map((t) => t.id));
+      if (tripIds.size > 0) {
+        const { data: allBookings } = await supabase
+          .from("bookings")
+          .select("id,trip_id,status,payment_status,fare_amount,total_amount,passenger_name,branch_id")
+          .in("trip_id", [...tripIds]);
+        setManifestBookings((allBookings as any[]) || []);
+      } else {
+        setManifestBookings([]);
+      }
     } catch (error) {
       console.error("Failed to load agency reports data:", error);
     } finally {
       setLoading(false);
     }
-  }, [selectedDate]);
+  }, [selectedDate, filterPeriod]);
 
   useEffect(() => {
     void loadData();
@@ -200,36 +200,86 @@ export default function AgencyReportsPage() {
     .filter((b) => b.status !== "cancelled")
     .reduce((sum, b) => sum + (b.totalAmount || 0), 0);
 
-  // Manifest Data Filtering - Allows space-insensitive searching (e.g. RAD100B matches RAD 100B)
+  const cleanStationName = (n: string) =>
+    n.toLowerCase().replace(/branch|station/g, "").trim();
+
+  // Manifest Data: real DB-driven rows computed with the canonical formula
   const filteredManifest = useMemo(() => {
     const cleanSearch = searchQuery.toLowerCase().replace(/\s+/g, "");
+    const verifiedPerTrip = new Map<string, number>();
+    const digitalRevPerTrip = new Map<string, number>();
+    for (const b of manifestBookings) {
+      if (!isVerifiedDigitalBooking(b)) continue;
+      const tid = bookingTripId(b);
+      if (!tid) continue;
+      verifiedPerTrip.set(tid, (verifiedPerTrip.get(tid) ?? 0) + 1);
+      const rev = Number(b.fare_amount) || Number(b.total_amount) || 0;
+      digitalRevPerTrip.set(tid, (digitalRevPerTrip.get(tid) ?? 0) + rev);
+    }
 
-    return SAMPLE_MANIFEST_DATA.filter((m) => {
-      const branchMatch =
-        selectedBranch === "All" ||
-        getBranchName(m.branch) === getBranchName(selectedBranch);
+    const now = new Date();
+    const rows: ManifestRow[] = manifestTrips
+      .filter((trip) => {
+        const td = (trip as any).date || (trip as any).travel_date;
+        if (!td) return false;
+        const tdShort = String(td).slice(0, 10);
+        if (filterPeriod === "day") {
+          if (tdShort !== selectedDate) return false;
+        } else if (filterPeriod === "month") {
+          if (tdShort.slice(0, 7) !== selectedDate.slice(0, 7)) return false;
+        } else {
+          if (tdShort.slice(0, 4) !== selectedDate.slice(0, 4)) return false;
+        }
+        if (selectedBranch !== "All") {
+          const branchName = getBranchName(selectedBranch).toLowerCase();
+          const from = cleanStationName(trip.from || "");
+          const to = cleanStationName(trip.to || "");
+          if (!from.includes(branchName) && !to.includes(branchName)) return false;
+        }
+        return true;
+      })
+      .map((trip) => {
+        const td = String((trip as any).date || (trip as any).travel_date || "");
+        const digital = verifiedPerTrip.get(trip.id) ?? 0;
+        const digitalRev = digitalRevPerTrip.get(trip.id) ?? 0;
+        const empty = Number(trip.emptySeats) || 0;
+        const capacity = Number(trip.totalSeats) || 29;
+        const price = Number(trip.price) || 0;
+        const departed = hasTripDeparted(td, trip.departureTime, now);
+        const paper = computePaperPassengers(capacity, empty, digital, departed);
+        const paperRev = paper * price;
+        return {
+          id: trip.id,
+          date: td.slice(0, 10),
+          departureTime: trip.departureTime || "—",
+          arrivalTime: trip.arrivalTime || "—",
+          trip: `${trip.from} → ${trip.to}`,
+          driverName: (trip as any).driverName || "Assigned Driver",
+          busPlate: trip.plateNumber || "UNASSIGNED",
+          emptySeats: empty,
+          urugendoPassengers: digital,
+          paperPassengers: paper,
+          totalPassengers: digital + paper,
+          branch: (trip.from || "") as AgencyBranch,
+          capacity,
+          priceRwf: price,
+          paperRevenue: paperRev,
+          digitalRevenue: digitalRev,
+        };
+      });
 
+    if (!cleanSearch) return rows;
+    return rows.filter((m) => {
       const cleanPlate = m.busPlate.toLowerCase().replace(/\s+/g, "");
       const cleanDriver = m.driverName.toLowerCase().replace(/\s+/g, "");
       const cleanTrip = m.trip.toLowerCase().replace(/\s+/g, "");
-
-      const searchMatch =
+      return (
         cleanPlate.includes(cleanSearch) ||
         cleanDriver.includes(cleanSearch) ||
-        cleanTrip.includes(cleanSearch);
-
-      if (filterPeriod === "day") {
-        return branchMatch && searchMatch && m.date === selectedDate;
-      } else if (filterPeriod === "month") {
-        return (
-          branchMatch &&
-          searchMatch &&
-          m.date.slice(0, 7) === selectedDate.slice(0, 7)
-        );
-      }
-      return branchMatch && searchMatch;
+        cleanTrip.includes(cleanSearch)
+      );
     });
-  }, [selectedDate, filterPeriod, selectedBranch, searchQuery]);
+  }, [manifestTrips, manifestBookings, selectedDate, filterPeriod, selectedBranch, searchQuery]);
 
   // Export File Handlers
   const handleExportUrugendo = () => {
@@ -258,11 +308,11 @@ export default function AgencyReportsPage() {
 
   const handleExportManifest = () => {
     const csvHeader =
-      "Date,Departure Time,Arrival Time,Trip,Driver Name,Bus Plate,Empty Seats,Urugendo Passengers,Total Onboard\n";
+      "Date,Departure Time,Arrival Time,Trip,Driver Name,Bus Plate,Capacity,Empty Seats,Urugendo Digital,Paper Tickets,Total Onboard,Urugendo Revenue (RWF),Paper Revenue (RWF),Total Revenue (RWF),Ticket Price (RWF)\n";
     const csvRows = filteredManifest
       .map(
         (m) =>
-          `"${m.date}","${m.departureTime}","${m.arrivalTime}","${m.trip}","${m.driverName}","${m.busPlate}",${m.emptySeats},${m.urugendoPassengers},${m.totalPassengers}`,
+          `"${m.date}","${m.departureTime}","${m.arrivalTime}","${m.trip}","${m.driverName}","${m.busPlate}",${m.capacity},${m.emptySeats},${m.urugendoPassengers},${m.paperPassengers},${m.totalPassengers},${m.digitalRevenue},${m.paperRevenue},${m.digitalRevenue + m.paperRevenue},${m.priceRwf}`,
       )
       .join("\n");
 
@@ -284,17 +334,28 @@ export default function AgencyReportsPage() {
     window.URL.revokeObjectURL(url);
   };
 
+  // WhatsApp Summary - uses real manifest + booking math to report accurate pax + revenue totals
   const handleWhatsApp = () => {
+    const reportTypeLabel = reportType === "urugendo" ? "Urugendo Digital Report" : "Station Manifest Report";
     const branchStr = getBranchName(selectedBranch);
-    const text =
-      reportType === "urugendo"
-        ? `*Bus Operator - Urugendo Digital Report*\n\nPeriod: ${selectedDate} (${filterPeriod})\nDigital Tickets Issued: ${
-            filteredBookings.length
-          }\nTotal Digital Revenue: ${urugendoRevenue.toLocaleString()} RWF\n\nAll-Time Digital: ${totalBookingsAllTime} tickets (${totalRevenueAllTime.toLocaleString()} RWF)`
-        : `*Bus Operator - Station Manifest Report*\n\nStation Branch: ${branchStr}\nDate: ${selectedDate}\nTotal Buses Manifested: ${filteredManifest.length}\nTotal Urugendo Onboard: ${filteredManifest.reduce(
-            (acc, m) => acc + m.urugendoPassengers,
-            0,
-          )}`;
+
+    let text: string;
+    if (reportType === "urugendo") {
+      text = `*Bus Operator - Urugendo Digital Report*\n\nPeriod: ${selectedDate} (${filterPeriod})\nDigital Tickets Issued: ${filteredBookings.length}\nTotal Digital Revenue: ${urugendoRevenue.toLocaleString()} RWF\n\nAll-Time Digital: ${totalBookingsAllTime} tickets (${totalRevenueAllTime.toLocaleString()} RWF)`;
+    } else {
+      const totalDigital = filteredManifest.reduce((acc, m) => acc + (m.urugendoPassengers ?? 0), 0);
+      const totalPaper = filteredManifest.reduce(
+        (acc, m) => acc + Math.max(0, (m.totalPassengers ?? 0) - (m.urugendoPassengers ?? 0)),
+        0,
+      );
+      const totalOnboard = totalDigital + totalPaper;
+      const manifestRev = filteredManifest.reduce((acc, m) => {
+        const paperPax = Math.max(0, (m.totalPassengers ?? 0) - (m.urugendoPassengers ?? 0));
+        const price = typeof (m as any).priceRwf === "number" ? (m as any).priceRwf : 0;
+        return acc + paperPax * price + ((m as any).digitalRevenue ?? 0);
+      }, 0);
+      text = `*Bus Operator - Station Manifest Report*\n\nBranch: ${branchStr}\nPeriod: ${selectedDate} (${filterPeriod})\nBuses Manifested: ${filteredManifest.length}\n\nUrugendo Digital Onboard: ${totalDigital}\nPaper Ticket Onboard: ${totalPaper}\nTotal Passengers: ${totalOnboard}\n\nManifest Revenue (Digital + Paper): ${manifestRev.toLocaleString()} RWF`;
+    }
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
   };
 
@@ -567,7 +628,10 @@ export default function AgencyReportsPage() {
                         Empty Seats
                       </th>
                       <th className="py-3.5 px-4 font-bold text-center text-primary">
-                        Passengers
+                        Urugendo Digital
+                      </th>
+                      <th className="py-3.5 px-4 font-bold text-center text-indigo-600">
+                        Paper Tickets
                       </th>
                       <th className="py-3.5 px-4 font-bold text-center">
                         Total Onboard
@@ -578,7 +642,7 @@ export default function AgencyReportsPage() {
                     {filteredManifest.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={9}
+                          colSpan={10}
                           className="py-12 text-center text-text-muted text-xs"
                         >
                           No bus departures recorded for{" "}
@@ -617,8 +681,11 @@ export default function AgencyReportsPage() {
                           <td className="py-3.5 px-4 text-center font-bold text-badge-green-text bg-badge-green-bg/30 whitespace-nowrap">
                             {m.urugendoPassengers}
                           </td>
+                          <td className="py-3.5 px-4 text-center font-bold whitespace-nowrap text-indigo-600 bg-indigo-50/40">
+                            {m.paperPassengers}
+                          </td>
                           <td className="py-3.5 px-4 text-center font-bold text-text-primary whitespace-nowrap">
-                            {m.totalPassengers} / 29
+                            {m.totalPassengers} / {m.capacity ?? 29}
                           </td>
                         </tr>
                       ))

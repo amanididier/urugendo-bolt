@@ -26,6 +26,7 @@ import {
   updateTripStatus,
   fetchAllBookings,
   updateBookingStatus,
+  resolveAgentBranchContext,
 } from "@/lib/api";
 import type { Trip, Booking } from "@/lib/types";
 import { supabase } from "@/lib/supabase";
@@ -175,32 +176,47 @@ function AgencyScheduleContent() {
       }
     })();
 
-    // Resolve real agency name for header (was hardcoded "Bus Operator")
+    // Resolve header labels via single source-of-truth resolver (prevents stale FK mismatches)
     (async () => {
-      const email = localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email");
-      if (!email) return;
       try {
-        const { data } = await supabase.from("agency_agents").select("branch_id,agency_name").eq("email", email).maybeSingle();
-        if ((data as any)?.agency_name) { setAgencyLabel((data as any).agency_name); return; }
-        if ((data as any)?.branch_id) {
-          const { data: br } = await supabase.from("branches").select("agency_name").eq("id", (data as any).branch_id).maybeSingle();
-          if ((br as any)?.agency_name) setAgencyLabel((br as any).agency_name);
+        const ctx = await resolveAgentBranchContext();
+        if (ctx.matched) {
+          if (ctx.branchName) setAgentBranch(ctx.branchName);
+          if (ctx.agencyName) setAgencyLabel(ctx.agencyName);
+          if (ctx.branchId) localStorage.setItem("urugendo_branch_id", ctx.branchId);
         }
       } catch {}
     })();
   }, []);
 
-  // Strict branch isolation: branch_id must match (no name fallback — that leaked Fasta↔Virunga)
+  // Strict branch isolation: resolve via SOURCE-OF-TRUTH branches table first
   const loadTrips = useCallback(async () => {
     setLoading(true);
     let currentBranchId: string | null = null;
+    let ctxAgency: string | null = null;
+    let ctxBranchName: string | null = null;
     try {
-      const em = localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email");
-      if (em) {
-        const { data: ar } = await supabase.from("agency_agents").select("branch_id").eq("email", em).maybeSingle();
-        if ((ar as any)?.branch_id) currentBranchId = (ar as any).branch_id;
+      const ctx = await resolveAgentBranchContext();
+      if (ctx.matched) {
+        currentBranchId = ctx.branchId;
+        ctxAgency = ctx.agencyName;
+        ctxBranchName = ctx.branchName;
+      }
+      if (!currentBranchId) {
+        const cached = localStorage.getItem("urugendo_branch_id");
+        if (cached) currentBranchId = cached;
+      }
+      if (!currentBranchId) {
+        const em = localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email");
+        if (em) {
+          const { data: ar } = await supabase.from("agency_agents").select("branch_id").eq("email", em).maybeSingle();
+          if ((ar as any)?.branch_id) currentBranchId = (ar as any).branch_id;
+        }
       }
     } catch {}
+    // Align header labels with actual data branch (prevents Kigali header + Musanze trips)
+    if (ctxBranchName) setAgentBranch(ctxBranchName);
+    if (ctxAgency) setAgencyLabel(ctxAgency);
     const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Kigali" }).format(new Date());
     const [tripData, bookingData] = await Promise.all([
       fetchTripsByDate(todayStr, currentBranchId || undefined),

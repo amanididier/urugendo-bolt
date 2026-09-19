@@ -862,3 +862,294 @@ function formatBookingData(b: any): Booking {
     },
   };
 }
+
+/* ------------------------------------------------------------------ */
+/*  Branch Isolation: Source-of-truth resolver (Kigali ≠ Musanze)     */
+/* ------------------------------------------------------------------ */
+
+export interface AgentBranchContext {
+  branchId: string;
+  branchName: string;
+  agencyName: string;
+  stationCode: string | null;
+  momoCode: string | null;
+  phone: string | null;
+  location: string | null;
+  agentName: string | null;
+  agentEmail: string | null;
+  /** True if we found a branches row matching agency+name exactly */
+  matched: boolean;
+  /** True when the email in agency_agents is actually assigned to this branch */
+  ownershipVerified: boolean;
+  /** If not matched, a human-readable reason (for debugging / UI warnings) */
+  reason?: string;
+}
+
+const BRANCH_LS_KEYS = [
+  "urugendo_agency",
+  "urugendo_branch",
+  "urugendo_agent_email",
+  "urugendo_user_email",
+] as const;
+
+function readLS(key: string): string | null {
+  try {
+    return typeof window !== "undefined" ? localStorage.getItem(key) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function cleanStationName(n: string): string {
+  return (n || "").toLowerCase().replace(/branch|station|terminal/g, "").trim();
+}
+
+/**
+ * SOURCE-OF-TRUTH: resolve the active branch using the SAME tokens the user
+ * verified with their station security code on login (agency + branch name).
+ * NEVER trust agency_agents.branch_id alone — it can be stale/NULL on legacy rows.
+ */
+export async function resolveAgentBranchContext(): Promise<AgentBranchContext> {
+  const agencyFromLogin = (readLSKey("urugendo_agency") || "").trim();
+  const branchFromLogin = (readLSKey("urugendo_branch") || readLSKey("urugendo_station") || "").trim();
+  const email = readLSKey("urugendo_agent_email") || readLSKey("urugendo_user_email");
+
+  const fallback: AgentBranchContext = {
+    branchId: "",
+    branchName: branchFromLogin || "Musanze",
+    agencyName: agencyFromLogin || "",
+    stationCode: null,
+    momoCode: null,
+    phone: null,
+    location: null,
+    agentName: null,
+    agentEmail: email,
+    matched: false,
+    ownershipVerified: false,
+    reason: "Missing agency/branch in localStorage",
+  };
+
+  if (!agencyFromLogin || !branchFromLogin) {
+    // Best-effort: try to resolve from email only if storage was wiped
+    if (email) {
+      try {
+        const { data: ar } = await supabase.from("agency_agents").select("id,branch_id,branch_name,agency_name,name,email").eq("email", email).maybeSingle();
+        const row = ar as any;
+        if (row?.branch_id) {
+          const { data: br } = await supabase.from("branches").select("id,name,agency_name,station_code,momo_code,phone,location,agent_name,agent_email").eq("id", row.branch_id).maybeSingle();
+          const b = br as any;
+          if (b) {
+            return {
+              branchId: b.id,
+              branchName: b.name,
+              agencyName: b.agency_name || row.agency_name || agencyFromLogin,
+              stationCode: b.station_code || null,
+              momoCode: b.momo_code || null,
+              phone: b.phone || null,
+              location: b.location || null,
+              agentName: b.agent_name || row.name || null,
+              agentEmail: b.agent_email || email || null,
+              matched: true,
+              ownershipVerified: true,
+            };
+          }
+        }
+      } catch {}
+    }
+    return fallback;
+  }
+
+  try {
+    // 1. Look up branches table: MUST match agency_name (case-insensitive) AND name (case-insensitive, normalized)
+    const { data: agencies } = await supabase
+      .from("branches")
+      .select("id,name,agency_name,station_code,momo_code,phone,location,agent_name,agent_email")
+      .ilike("agency_name", agencyFromLogin);
+
+    const normalizedBranch = cleanStationName(branchFromLogin);
+    const exactBranch = (agencies as any[] || []).find(
+      (b) => cleanStationName(b.name) === normalizedBranch,
+    ) || (agencies as any[] || []).find(
+      (b) => cleanStationName(b.name).includes(normalizedBranch) || normalizedBranch.includes(cleanStationName(b.name)),
+    );
+
+    if (!exactBranch) {
+      fallback.reason = `No public.branches row matched agency="${agencyFromLogin}" branch="${branchFromLogin}". Ask manager to add it.`;
+      return fallback;
+    }
+
+    // 2. Verify the email in agency_agents belongs to this branch
+    let ownershipVerified = false;
+    let agentName: string | null = exactBranch.agent_name || null;
+    if (email) {
+      try {
+        const { data: ar } = await supabase.from("agency_agents").select("id,name,email,branch_id,branch_name,agency_name").eq("email", email).maybeSingle();
+        const row = ar as any;
+        if (row) {
+          agentName = row.name || agentName;
+          // Ownership passes IF (branch_id matches) OR (agency + name matches) OR (not yet set — we'll repair it below)
+          const sameBranchId = row.branch_id && row.branch_id === exactBranch.id;
+          const sameAgencyPlusName =
+            (!row.agency_name || cleanStationName(row.agency_name) === cleanStationName(exactBranch.agency_name)) &&
+            (!row.branch_name || cleanStationName(row.branch_name) === cleanStationName(exactBranch.name));
+          const noBranchYet = !row.branch_id && !row.branch_name;
+          ownershipVerified = !!sameBranchId || !!sameAgencyPlusName || !!noBranchYet;
+        }
+      } catch {}
+    } else {
+      ownershipVerified = true; // No email session on first-run pages
+    }
+
+    return {
+      branchId: exactBranch.id,
+      branchName: exactBranch.name,
+      agencyName: exactBranch.agency_name || agencyFromLogin,
+      stationCode: exactBranch.station_code || null,
+      momoCode: exactBranch.momo_code || null,
+      phone: exactBranch.phone || null,
+      location: exactBranch.location || null,
+      agentName: exactBranch.agent_name || agentName,
+      agentEmail: exactBranch.agent_email || email || null,
+      matched: true,
+      ownershipVerified,
+    };
+  } catch (e: any) {
+    fallback.reason = e?.message || String(e);
+    return fallback;
+  }
+}
+
+/** Repair helper — call on every successful login: this guarantees that the
+ *  agency_agents foreign key + denorm fields stay in sync with the real branch.
+ *  Legacy rows that had NULL/Wrong branch_id are fixed forever on first login. */
+export async function repairAgentBranchOwnership(
+  opts: { email: string; agencyName: string; branchName: string; branchId: string; agentName?: string | null },
+): Promise<void> {
+  try {
+    await supabase.from("agency_agents")
+      .update({
+        agency_name: opts.agencyName.trim(),
+        branch_name: opts.branchName.trim(),
+        branch_id: opts.branchId,
+        ...(opts.agentName ? { name: opts.agentName.trim() } : {}),
+      })
+      .ilike("email", opts.email.trim().toLowerCase());
+  } catch (e) {
+    console.warn("[branch] repairAgentBranchOwnership skipped:", e);
+  }
+}
+
+// localStorage reader wrapper (tiny adapter to avoid try/catch repetition above)
+function readLSKey(key: string): string | null {
+  return readLS(key);
+}
+
+// Re-export cleanStationName for pages (keep alias for api callers)
+
+/* ------------------------------------------------------------------ */
+/*  Safety helpers: cross-account leakage guard for shared-device use  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Removes every localStorage key with the `urugendo_` or Supabase `sb-`
+ * prefix, EXCEPT the ones in the allowlist (login form fields we want
+ * to keep between sweep and successful auth completion).
+ */
+export function clearUrugendoSweepableStorage(allowlist: string[] = []): void {
+  if (typeof window === "undefined") return;
+  const keep = new Set(allowlist.map((k) => k.toLowerCase()));
+  const keysToRemove: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k) continue;
+    if (!k.startsWith("urugendo_") && !k.startsWith("sb-")) continue;
+    if (keep.has(k.toLowerCase())) continue;
+    keysToRemove.push(k);
+  }
+  keysToRemove.forEach((k) => localStorage.removeItem(k));
+  // sessionStorage sweep (rare but some SSR frameworks use it)
+  try {
+    const skeysToRemove: string[] = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (!k) continue;
+      if (k.startsWith("urugendo_") || k.startsWith("sb-")) skeysToRemove.push(k);
+    }
+    skeysToRemove.forEach((k) => sessionStorage.removeItem(k));
+  } catch {}
+}
+
+/**
+ * Session guard: MUST be called on mount of every page that renders
+ * branch-scoped data (dashboard/schedule/reports/manifest/profile/manager).
+ *
+ * Checks: 1) if localStorage `urugendo_branch_id` disagrees with the
+ * source-of-truth resolver (agency+branch name → branches table), the
+ * previous user's session was NOT logged out properly → perform a full
+ * sweep and hard-redirect to login.  2) if resolver returns ownership
+ * not verified → also force re-login (prevents agency_agents FK swap
+ * attack: e.g. old FK points to Musanze but new login is Kigali).
+ *
+ * Returns true when ownership passes (page may continue loading).
+ * Returns false when we triggered the redirect (caller should bail).
+ */
+export async function validateAgentBranchOwnershipOrLogout(opts: {
+  router: { push: (href: string) => void };
+  loginHref?: string;
+  mode?: "agent" | "manager" | "any";
+}): Promise<boolean> {
+  const { router, loginHref = "/agency/agency-login", mode = "any" } = opts;
+  if (typeof window === "undefined") return true;
+
+  // Manager pages: only need the manager_id presence check (they don't use branches)
+  if (mode === "manager") {
+    const mid = localStorage.getItem("urugendo_manager_id");
+    const mcode = localStorage.getItem("urugendo_manager_code");
+    const memail = localStorage.getItem("urugendo_manager_email");
+    if (!mid || !mcode || !memail) {
+      clearUrugendoSweepableStorage();
+      try { await supabase.auth.signOut(); } catch {}
+      window.location.href = loginHref;
+      return false;
+    }
+    return true;
+  }
+
+  // Agent pages
+  const ctx = await resolveAgentBranchContext();
+  const cachedId = localStorage.getItem("urugendo_branch_id");
+
+  let needsLogout = false;
+  let reason = "";
+
+  if (ctx.matched && cachedId && cachedId !== ctx.branchId) {
+    needsLogout = true;
+    reason = `cached branch_id (${cachedId.slice(0, 8)}…) ≠ resolved branch_id (${ctx.branchId.slice(0, 8)}…)`;
+  }
+  if (ctx.matched && !ctx.ownershipVerified && storedAgentEmailPresentAny()) {
+    // Email in agency_agents is NOT attached to this branches row; could be cross-branch leak
+    needsLogout = true;
+    reason = `agency_agents ownership not verified for branch="${ctx.branchName}"`;
+  }
+  if (!ctx.matched && storedAgentEmailPresentAny()) {
+    // No branches row at all for the storage tokens → logout forces fresh login to repair
+    needsLogout = true;
+    reason = `resolver could not match branches row for stored session`;
+  }
+
+  if (needsLogout) {
+    console.warn("[branch-safety] logging out due to:", reason, { ctx: { matched: ctx.matched, branchName: ctx.branchName, ownershipVerified: ctx.ownershipVerified }, cachedId });
+    clearUrugendoSweepableStorage();
+    try { await supabase.auth.signOut(); } catch {}
+    // Hard reload (clears all in-memory React state)
+    window.location.href = loginHref;
+    return false;
+  }
+  return true;
+}
+
+function storedAgentEmailPresentAny(): boolean {
+  if (typeof window === "undefined") return false;
+  return !!(localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email"));
+}
+

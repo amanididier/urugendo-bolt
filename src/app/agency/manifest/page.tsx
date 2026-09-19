@@ -16,7 +16,7 @@ import {
   Armchair,
   FileSpreadsheet,
 } from "lucide-react";
-import { fetchTripsByDate, updateTripEmptySeats } from "@/lib/api";
+import { fetchTripsByDate, updateTripEmptySeats, resolveAgentBranchContext } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import type { AgencyBranch, Trip } from "@/lib/types";
 import { getRwandaToday } from "@/lib/dateUtils";
@@ -69,17 +69,23 @@ export default function AgencyManifestPage() {
   const [savedFeedback, setSavedFeedback] = useState<string | null>(null);
 
   useEffect(() => {
-    const savedBranch = localStorage.getItem("urugendo_branch") || "Musanze";
-    setStationBranch(savedBranch);
-
     async function loadData() {
-      try {
+      const ctx = await resolveAgentBranchContext();
+      let branchId: string | null = ctx.matched ? ctx.branchId : null;
+      if (!branchId) {
+        const cached = localStorage.getItem("urugendo_branch_id");
+        if (cached) branchId = cached;
+      }
+      if (!branchId) {
         const em = localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email");
-        let branchId: string | null = null;
         if (em) {
           const { data: ar } = await supabase.from("agency_agents").select("branch_id").eq("email", em).maybeSingle();
           branchId = (ar as any)?.branch_id || null;
         }
+      }
+      const savedBranch = ctx.matched ? ctx.branchName : (localStorage.getItem("urugendo_branch") || "Musanze");
+      setStationBranch(savedBranch);
+      try {
         const todayStr = getRwandaToday();
         const todayTrips = await fetchTripsByDate(todayStr, branchId || undefined);
         // Trips are already branch-scoped; derive relevant bookings from their ids (no cross-branch leakage)
@@ -199,11 +205,15 @@ export default function AgencyManifestPage() {
     const tableRows = isIncoming
       ? activeList
           .map((trip) => {
+            const sourceTrip = trips.find((t) => t.id === trip.tripId);
+            
             const paperTickets = computePaperPassengers(
               trip.capacity,
               emptySeats[trip.tripId] ?? 0,
               trip.urugendoPassengers,
-              true,
+              sourceTrip
+                ? hasTripDeparted(sourceTrip.date, sourceTrip.departureTime)
+                : true,
             );
             return `
             <tr>
@@ -372,11 +382,14 @@ export default function AgencyManifestPage() {
       <div className="p-4 max-w-2xl mx-auto space-y-3">
         {activeTab === "incoming"
           ? stationIncoming.map((trip) => {
+              const sourceTrip = trips.find((t) => t.id === trip.tripId);
               const paperTickets = computePaperPassengers(
                 trip.capacity,
                 emptySeats[trip.tripId] ?? 0,
                 trip.urugendoPassengers,
-                true,
+                sourceTrip
+                  ? hasTripDeparted(sourceTrip.date, sourceTrip.departureTime)
+                  : true,
               );
               return (
                 <div

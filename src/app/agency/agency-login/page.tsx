@@ -29,6 +29,7 @@ import {
   authenticateManager,
   persistManagerSession,
 } from "@/lib/managerAuth";
+import { repairAgentBranchOwnership, clearUrugendoSweepableStorage } from "@/lib/api";
 
 interface OperatorOption {
   id: string;
@@ -354,6 +355,22 @@ function LoginContent() {
 
     setLoading(true);
 
+    // ── Safety: Sweep any stale session from a PREVIOUS user on this same device ──
+    // Keep only the form fields the user explicitly typed/picked (operator picker,
+    // branch picker, name+email, lockout counters). Wipes: any urugendo_branch_id,
+    // urugendo_branch_momo, urugendo_manager_*, urugendo_role, sb-* tokens, etc.
+    const keepFormState = [
+      "urugendo_agency",
+      "urugendo_branch",
+      "urugendo_station",
+      "urugendo_agent_name",
+      "urugendo_agent_email",
+      // Security attempt counters: keep them (tied to branch, not user identity)
+      `${LOCKOUT_KEY_PREFIX}${selectedBranch}`,
+      `${FAILED_ATTEMPTS_KEY_PREFIX}${selectedBranch}`,
+    ];
+    clearUrugendoSweepableStorage(keepFormState);
+
     if (isSignUp) {
       const { data: authData, error: authErr } = await supabase.auth.signUp({
         email,
@@ -515,6 +532,47 @@ function LoginContent() {
         })
         .eq("id", authData.user.id);
 
+      // ── Enrich session: resolve authoritative branch + repair FK ownership ──
+      let repairedBranchId: string | null = null;
+      try {
+        const { data: branchRow } = await supabase
+          .from("branches")
+          .select("id,name,agency_name,station_code,momo_code,phone,location")
+          .ilike("agency_name", selectedOperator.name)
+          .limit(100);
+        const norm = (s: string) => (s || "").toLowerCase().replace(/branch|station|terminal/g, "").trim();
+        const picked = norm(selectedBranch);
+        const matched = (branchRow as any[] || []).find(
+          (b) => norm(b.name) === picked,
+        ) || (branchRow as any[] || []).find(
+          (b) => norm(b.name).includes(picked) || picked.includes(norm(b.name)),
+        ) as any;
+        if (matched?.id) {
+          repairedBranchId = matched.id;
+          await repairAgentBranchOwnership({
+            email: email,
+            agencyName: matched.agency_name || selectedOperator.name,
+            branchName: matched.name || selectedBranch,
+            branchId: matched.id,
+            agentName: fullName || null,
+          });
+          if (typeof window !== "undefined") {
+            localStorage.setItem("urugendo_branch_id", matched.id);
+            localStorage.setItem("urugendo_branch", matched.name || selectedBranch);
+            localStorage.setItem("urugendo_agency", matched.agency_name || selectedOperator.name);
+            if (matched.station_code) localStorage.setItem("urugendo_station_code", matched.station_code);
+            if (matched.momo_code) {
+              localStorage.setItem("urugendo_branch_momo", matched.momo_code);
+              localStorage.setItem(`momo_code_${norm(matched.name)}`, matched.momo_code);
+            }
+            if (matched.phone) localStorage.setItem("urugendo_branch_phone", matched.phone);
+            if (matched.location) localStorage.setItem("urugendo_branch_location", matched.location);
+          }
+        }
+      } catch (enrichErr) {
+        console.warn("[login] branch enrich skipped:", enrichErr);
+      }
+
       setLoading(false);
 
       if (typeof window !== "undefined") {
@@ -525,7 +583,8 @@ function LoginContent() {
         if (selectedOperator) {
           localStorage.setItem("urugendo_agency", selectedOperator.name);
         }
-        if (selectedBranch) {
+        if (selectedBranch && !repairedBranchId) {
+          // Only keep the user-picked name fallback if DB match failed (rare)
           localStorage.setItem("urugendo_branch", selectedBranch);
         }
       }

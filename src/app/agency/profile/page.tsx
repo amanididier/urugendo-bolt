@@ -24,6 +24,7 @@ import { supabase } from "@/lib/supabase";
 import { useApp } from "@/context/app-context";
 import { Language } from "@/lib/types";
 import { fetchUnreadCount } from "@/lib/notificationsService";
+import { resolveAgentBranchContext } from "@/lib/api";
 
 export default function AgentProfilePage() {
   const router = useRouter();
@@ -110,53 +111,70 @@ export default function AgentProfilePage() {
         resolvedBranch = storedBranch;
       }
 
-      let resolvedBranchId: string | null = null;
-      let resolvedAgency: string | null = storedAgency || agencyName || null;
-      try {
-        const email = localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email");
-        if (email) {
-          const { data: ar } = await supabase.from("agency_agents").select("branch_id,agency_name").eq("email", email).maybeSingle();
-          if ((ar as any)?.branch_id) resolvedBranchId = (ar as any).branch_id;
-          if ((ar as any)?.agency_name) resolvedAgency = (ar as any).agency_name;
-        }
-      } catch {}
+      // ── SOURCE OF TRUTH: branches table resolver ────────────────
+      const ctx = await resolveAgentBranchContext();
+      let resolvedBranchId: string | null = ctx.matched ? ctx.branchId : null;
+      let resolvedAgency: string | null = ctx.matched ? ctx.agencyName : (storedAgency || agencyName || null);
+      const currentBranch = ctx.matched
+        ? ctx.branchName
+        : (storedBranch || resolvedBranch || branchName || "Musanze");
 
-      // Fetch live branch MoMo code AND contact phone — branch_id is authoritative (name alone leaks across agencies)
-      const currentBranch = resolvedBranch || branchName || "Musanze";
-      let branchResolved = false;
-      try {
-        let bData: any = null;
-        if (resolvedBranchId) {
-          const { data } = await supabase.from("branches").select("momo_code, phone").eq("id", resolvedBranchId).maybeSingle();
-          bData = data || null;
-        }
-        if (!bData && resolvedAgency) {
-          const { data } = await supabase.from("branches").select("momo_code, phone").eq("agency_name", resolvedAgency).ilike("name", currentBranch).maybeSingle();
-          bData = data || null;
-        }
-        if (!bData) {
-          const { data } = await supabase.from("branches").select("momo_code, phone").ilike("name", `%${currentBranch}%`).maybeSingle();
-          bData = data || null;
-        }
-        if (bData?.momo_code) {
-          setMomoCode(bData.momo_code);
-          localStorage.setItem("urugendo_branch_momo", bData.momo_code);
-          branchResolved = true;
-        } else if (bData && !bData.momo_code) {
+      if (ctx.matched) {
+        if (ctx.branchName && !branchName) setBranchName(ctx.branchName);
+        if (ctx.agencyName && !agencyName) setAgencyName(ctx.agencyName);
+        if (ctx.stationCode && !stationCode) setStationCode(ctx.stationCode);
+        if (ctx.momoCode) {
+          setMomoCode(ctx.momoCode);
+          localStorage.setItem("urugendo_branch_momo", ctx.momoCode);
+        } else {
           setMomoCode("");
-          branchResolved = true;
         }
-        if (bData?.phone) setBranchPhone(bData.phone);
-      } catch {
-        // Fall back to localized memory
-      }
+        if (ctx.phone) setBranchPhone(ctx.phone);
+      } else {
+        if (!resolvedBranchId) {
+          try {
+            const email = localStorage.getItem("urugendo_agent_email") || localStorage.getItem("urugendo_user_email");
+            if (email) {
+              const { data: ar } = await supabase.from("agency_agents").select("branch_id,agency_name").eq("email", email).maybeSingle();
+              if ((ar as any)?.branch_id) resolvedBranchId = (ar as any).branch_id;
+              if ((ar as any)?.agency_name) resolvedAgency = (ar as any).agency_name;
+            }
+          } catch {}
+        }
+        let branchResolved = false;
+        try {
+          let bData: any = null;
+          if (resolvedBranchId) {
+            const { data } = await supabase.from("branches").select("momo_code, phone, station_code").eq("id", resolvedBranchId).maybeSingle();
+            bData = data || null;
+          }
+          if (!bData && resolvedAgency) {
+            const { data } = await supabase.from("branches").select("momo_code, phone, station_code").eq("agency_name", resolvedAgency).ilike("name", currentBranch).maybeSingle();
+            bData = data || null;
+          }
+          if (!bData) {
+            const { data } = await supabase.from("branches").select("momo_code, phone, station_code").ilike("name", `%${currentBranch}%`).maybeSingle();
+            bData = data || null;
+          }
+          if (bData?.momo_code) {
+            setMomoCode(bData.momo_code);
+            localStorage.setItem("urugendo_branch_momo", bData.momo_code);
+            branchResolved = true;
+          } else if (bData) {
+            setMomoCode("");
+            branchResolved = true;
+          }
+          if (bData?.phone) setBranchPhone(bData.phone);
+          if (bData?.station_code && !stationCode) setStationCode(bData.station_code);
+        } catch {}
 
-      if (!branchResolved) {
-        const storedMomo =
-          localStorage.getItem(`momo_code_${currentBranch.toLowerCase()}`) ||
-          localStorage.getItem("urugendo_branch_momo") ||
-          localStorage.getItem("urugendo_momo_code");
-        if (storedMomo && /^\d{6,7}$/.test(storedMomo)) setMomoCode(storedMomo);
+        if (!branchResolved) {
+          const storedMomo =
+            localStorage.getItem(`momo_code_${currentBranch.toLowerCase()}`) ||
+            localStorage.getItem("urugendo_branch_momo") ||
+            localStorage.getItem("urugendo_momo_code");
+          if (storedMomo && /^\d{6,7}$/.test(storedMomo)) setMomoCode(storedMomo);
+        }
       }
     }
 

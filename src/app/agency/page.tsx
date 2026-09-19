@@ -34,6 +34,7 @@ import {
   updateBookingStatus,
   updateTripStatus,
   updateTripEmptySeats,
+  resolveAgentBranchContext,
 } from "@/lib/api";
 import { fetchBranchRevenue } from "@/lib/branchService";
 import type { PeriodStats } from "@/lib/branchService";
@@ -325,25 +326,41 @@ export default function AgencyDashboard() {
   useEffect(() => {
     let isMounted = true;
 
-    const branch = localStorage.getItem("urugendo_branch") || "Musanze";
+    const defaultBranch = localStorage.getItem("urugendo_branch") || "Musanze";
     const opId = localStorage.getItem("urugendo_operator_id") || "";
-    setAgentBranch(branch);
+    setAgentBranch(defaultBranch);
     setOperatorId(opId);
 
     async function loadDashboardData() {
       setLoading(true);
       try {
+        // ── SOURCE OF TRUTH: branches table resolver ──────────────────
+        const ctx = await resolveAgentBranchContext();
+        let resolvedBranchId: string | null = ctx.matched ? ctx.branchId : null;
+
+        // Belt & braces: localStorage urugendo_branch_id written at login
+        if (!resolvedBranchId) {
+          const cached = localStorage.getItem("urugendo_branch_id");
+          if (cached) resolvedBranchId = cached;
+        }
+
+        // Last-resort fallback ONLY if the two newer sources both miss
         const storedAgentEmail =
           localStorage.getItem("urugendo_agent_email") ||
           localStorage.getItem("urugendo_user_email");
-        let resolvedBranchId: string | null = null;
-        if (storedAgentEmail) {
+        if (!resolvedBranchId && storedAgentEmail) {
           const { data: agentRow } = await supabase
             .from("agency_agents")
             .select("branch_id")
             .eq("email", storedAgentEmail)
             .maybeSingle();
           resolvedBranchId = (agentRow as any)?.branch_id ?? null;
+        }
+
+        // Keep header UI aligned with actual data branch (no more Kigali header + Musanze data)
+        if (ctx.matched) {
+          setAgentBranch(ctx.branchName || defaultBranch);
+          setAgencyLabel(ctx.agencyName || agencyLabel);
         }
 
         const todayStr = getRwandaToday();
@@ -743,11 +760,12 @@ export default function AgencyDashboard() {
     const tableRows = isIncoming
       ? activeList
           .map((trip, idx) => {
+            const sourceTrip = trips.find((t) => t.id === trip.tripId);
             const paperTickets = computePaperPassengers(
               trip.capacity,
               emptySeats[trip.tripId] ?? 0,
               trip.urugendoPassengers,
-              true,
+              sourceTrip ? isTripDeparted(sourceTrip) : true,
             );
             const bg = idx % 2 === 0 ? "#FFFFFF" : "#F8FAFC";
             return `
@@ -1694,11 +1712,12 @@ export default function AgencyDashboard() {
           <div className="space-y-3">
             {manifestSubTab === "incoming"
               ? stationIncoming.map((trip) => {
+                  const sourceTrip = trips.find((t) => t.id === trip.tripId);
                   const paperTickets = computePaperPassengers(
                     trip.capacity,
                     emptySeats[trip.tripId] ?? 0,
                     trip.urugendoPassengers,
-                    true,
+                    sourceTrip ? isTripDeparted(sourceTrip) : true,
                   );
                   return (
                     <div

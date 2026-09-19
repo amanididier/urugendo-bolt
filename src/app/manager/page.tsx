@@ -665,29 +665,277 @@ export default function AgencyManagerApp() {
 
   const handleGenerateReport = () => {
     const label = periodLabel(selectedPeriod, customDate);
-    const lines = [
-      `URUGENDO AGENCY REPORT (${label})`,
-      `Agency: ${session?.agencyName}`,
-      `Manager: ${session?.name} (${session?.email})`,
-      `Generated: ${new Date().toLocaleString()}`,
-      `Total Passengers: ${totalPassengers}`,
-      `Total Revenue: ${formatRwf(totalRevenue)}`,
-      ``,
-      `Branches Breakdown:`,
-      ...branchStats.map(
-        ({ branch, stats }) =>
-          `- ${branch.name} (${branch.location}): ${formatRwf(stats.revenue)} · ${stats.passengers} passengers · MoMo: *${branch.momoCode}#`,
-      ),
-    ];
+    const nowStr = new Date().toLocaleString();
+    const rawTotal = branches.reduce(
+      (acc, b) => {
+        const s = periodStats[b.id] ?? {} as any;
+        return {
+          passengers: acc.passengers + (s.passengers ?? 0),
+          revenue: acc.revenue + (s.revenue ?? 0),
+          urugendoPassengers: acc.urugendoPassengers + (s.urugendoPassengers ?? 0),
+          urugendoRevenue: acc.urugendoRevenue + (s.urugendoRevenue ?? 0),
+          paperPassengers: acc.paperPassengers + (s.paperPassengers ?? 0),
+          paperRevenue: acc.paperRevenue + (s.paperRevenue ?? 0),
+        };
+      },
+      { passengers: 0, revenue: 0, urugendoPassengers: 0, urugendoRevenue: 0, paperPassengers: 0, paperRevenue: 0 },
+    );
 
-    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `Urugendo_Report_${selectedPeriod}_${Date.now()}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast("Report downloaded successfully");
+    const sorted = [...branches]
+      .map((b) => {
+        const s = periodStats[b.id] ?? {} as any;
+        return {
+          branch: b,
+          passengers: s.passengers ?? 0,
+          revenue: s.revenue ?? 0,
+          urugendoPassengers: s.urugendoPassengers ?? 0,
+          urugendoRevenue: s.urugendoRevenue ?? 0,
+          paperPassengers: s.paperPassengers ?? 0,
+          paperRevenue: s.paperRevenue ?? 0,
+          trips: s.manifestTrips ?? s.tripCount ?? 0,
+        };
+      })
+      .sort((a, b) => b.revenue - a.revenue);
+
+    const maxRev = Math.max(1, sorted[0]?.revenue || 1);
+    const totalPct = (n: number) => `${((n / (rawTotal.revenue || 1)) * 100).toFixed(1)}%`;
+
+    const timestamp = `${selectedPeriod}-${Date.now()}`;
+
+    // ── CSV (spreadsheet-friendly) ──────────────────────────────────
+    const csvHeader =
+      "Rank,Branch,Location,Station Code,Agent Name,Agent Email,Phone,MoMo Code,"
+      + "Urugendo Digital Pax,Urugendo Digital Revenue (RWF),Paper Tickets Pax,Paper Revenue (RWF),"
+      + "Total Pax,Total Revenue (RWF),Share of Total\n";
+    const csvRows = sorted
+      .map((r, i) =>
+        [
+          i + 1,
+          `"${r.branch.name}"`,
+          `"${r.branch.location}"`,
+          r.branch.stationCode || "",
+          `"${r.branch.agentName || ""}"`,
+          `"${r.branch.agentEmail || ""}"`,
+          `"${r.branch.phone || ""}"`,
+          `*${r.branch.momoCode || "—"}#`,
+          r.urugendoPassengers,
+          r.urugendoRevenue,
+          r.paperPassengers,
+          r.paperRevenue,
+          r.passengers,
+          r.revenue,
+          totalPct(r.revenue),
+        ].join(","),
+      )
+      .join("\n");
+    const csv =
+      csvHeader
+      + csvRows
+      + `\n"","","","","","","","TOTAL",${rawTotal.urugendoPassengers},${rawTotal.urugendoRevenue},${rawTotal.paperPassengers},${rawTotal.paperRevenue},${rawTotal.passengers},${rawTotal.revenue},"100.0%"`;
+
+    const csvBlob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const csvUrl = URL.createObjectURL(csvBlob);
+    const aCsv = document.createElement("a");
+    aCsv.href = csvUrl;
+    aCsv.download = `Urugendo_Report_CSV_${timestamp}.csv`;
+    aCsv.click();
+    URL.revokeObjectURL(csvUrl);
+
+    // ── HTML (Apple-level design, print-to-PDF ready) ───────────────
+    const branchRowsHtml = sorted
+      .map((r, i) => {
+        const barW = ((r.revenue / maxRev) * 100).toFixed(2);
+        const badgeColor = i === 0 ? "bg-amber-100 text-amber-700" : i === 1 ? "bg-slate-100 text-slate-600" : i === 2 ? "bg-orange-100 text-orange-700" : "bg-slate-50 text-slate-500";
+        return `
+        <tr class="h-12 hover:bg-slate-50/60 transition-colors">
+          <td class="text-left px-5 py-3 align-middle">
+            <span class="inline-flex items-center gap-2">
+              <span class="font-black text-[13px] w-6 h-6 rounded-full ${badgeColor} flex items-center justify-center">${i + 1}</span>
+              <span class="font-semibold text-slate-900">${r.branch.name}</span>
+            </span>
+            <div class="text-[11px] text-slate-500 mt-0.5 ml-8">${r.branch.location} · Code ${r.branch.stationCode || "—"}</div>
+          </td>
+          <td class="text-right px-5 py-3 align-middle font-mono text-[12.5px] text-slate-700">${r.urugendoPassengers.toLocaleString()}</td>
+          <td class="text-right px-5 py-3 align-middle font-mono text-[12.5px] font-semibold text-emerald-600">${r.urugendoRevenue.toLocaleString()}</td>
+          <td class="text-right px-5 py-3 align-middle font-mono text-[12.5px] text-slate-700">${r.paperPassengers.toLocaleString()}</td>
+          <td class="text-right px-5 py-3 align-middle font-mono text-[12.5px] font-semibold text-indigo-600">${r.paperRevenue.toLocaleString()}</td>
+          <td class="text-right px-5 py-3 align-middle font-mono text-[12.5px] font-bold text-slate-900">${r.passengers.toLocaleString()}</td>
+          <td class="text-right px-5 py-3 align-middle">
+            <div class="flex items-center gap-2.5 justify-end">
+              <div class="w-24 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div class="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-600" style="width:${barW}%"></div></div>
+              <div class="min-w-[110px] text-right">
+                <div class="font-mono font-bold text-slate-900 text-[12.5px]">RWF ${r.revenue.toLocaleString()}</div>
+                <div class="text-[10px] text-slate-400 font-semibold">${totalPct(r.revenue)} share</div>
+              </div>
+            </div>
+          </td>
+          <td class="text-right px-5 py-3 align-middle font-mono text-[12px] text-slate-600">*${r.branch.momoCode || "—"}#</td>
+        </tr>`;
+      })
+      .join("");
+
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Urugendo Agency Report — ${session?.agencyName || "Agency"} — ${label}</title>
+<link rel="icon" href="/favicon.png" type="image/png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  html,body{font-family:"Plus Jakarta Sans",ui-sans-serif,system-ui,sans-serif;background:#EEF1F5;color:#0F172A;min-height:100%}
+  @page{size:A4;margin:14mm 12mm}
+  .page{max-width:1100px;margin:40px auto;padding:0 24px}
+  .card{background:#fff;border-radius:28px;box-shadow:0 1px 3px rgba(15,23,42,.06),0 20px 50px -20px rgba(15,23,42,.18);border:1px solid rgba(226,232,240,.8);overflow:hidden}
+  .hero{background:linear-gradient(135deg,#00B85C 0%,#009e50 50%,#0A1A12 100%);color:#fff;padding:44px 44px 40px;position:relative;overflow:hidden}
+  .hero::after{content:"";position:absolute;right:-100px;top:-80px;width:360px;height:360px;border-radius:50%;background:rgba(255,255,255,.08);filter:blur(10px)}
+  .hero::before{content:"";position:absolute;left:-40px;bottom:-60px;width:220px;height:220px;border-radius:50%;background:rgba(255,255,255,.06)}
+  .hero-inner{position:relative;z-index:1}
+  .brand{display:flex;align-items:center;gap:14px}
+  .brand-mark{width:52px;height:52px;border-radius:18px;background:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 20px -10px rgba(0,0,0,.3);overflow:hidden}
+  .brand-mark img{width:42px;height:42px;object-fit:contain}
+  .eyebrow{font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.78);margin-bottom:6px}
+  .h1{font-size:32px;font-weight:900;letter-spacing:-.02em;line-height:1.15}
+  .subtitle{font-size:13.5px;color:rgba(255,255,255,.82);font-weight:500;margin-top:8px}
+  .meta{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:28px}
+  .meta-cell{background:rgba(255,255,255,.1);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.14);border-radius:18px;padding:14px 16px}
+  .meta-label{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.68)}
+  .meta-value{font-size:15px;font-weight:800;margin-top:4px}
+  .body{padding:36px 44px 44px}
+  .section-title{font-size:15px;font-weight:900;color:#0F172A;letter-spacing:-.01em;margin-bottom:16px;display:flex;align-items:center;gap:10px}
+  .section-title::before{content:"";width:4px;height:16px;border-radius:4px;background:#00B85C}
+  .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:32px}
+  .kpi{background:#F8FAFC;border:1px solid #E2E8F0;border-radius:22px;padding:18px 20px;position:relative;overflow:hidden}
+  .kpi-accent{position:absolute;right:-18px;top:-18px;width:80px;height:80px;border-radius:50%;opacity:.08}
+  .kpi-label{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#64748B}
+  .kpi-value{font-size:24px;font-weight:900;letter-spacing:-.02em;color:#0F172A;margin-top:6px;line-height:1}
+  .kpi-sub{font-size:11.5px;color:#475569;font-weight:600;margin-top:8px}
+  .pill{display:inline-flex;align-items:center;padding:3px 9px;border-radius:999px;font-size:10.5px;font-weight:800;letter-spacing:.02em}
+  .pill-emerald{background:#D1FAE5;color:#065F46}
+  .pill-indigo{background:#E0E7FF;color:#3730A3}
+  .pill-slate{background:#F1F5F9;color:#475569}
+  .mix-grid{display:grid;grid-template-columns:1.1fr 1fr;gap:20px;margin-bottom:32px}
+  .mix-card{background:#F8FAFC;border:1px solid #E2E8F0;border-radius:22px;padding:22px 24px}
+  .mix-row{display:flex;align-items:center;gap:14px;margin-top:14px}
+  .mix-row:first-of-type{margin-top:16px}
+  .mix-swatch{width:14px;height:14px;border-radius:6px;flex-shrink:0}
+  .mix-label{font-size:12.5px;font-weight:700;color:#334155;flex:1}
+  .mix-amt{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:800;font-size:13px;color:#0F172A}
+  .mix-bar-wrap{height:10px;width:100%;background:#E2E8F0;border-radius:999px;overflow:hidden;margin-top:16px}
+  .mix-bar{height:100%;border-radius:999px}
+  table{width:100%;border-collapse:separate;border-spacing:0}
+  thead th{background:#F8FAFC;font-size:10.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#64748B;padding:14px 18px;border-bottom:1px solid #E2E8F0;text-align:right}
+  thead th:first-child{text-align:left}
+  tbody td{border-bottom:1px solid #F1F5F9}
+  tbody tr:last-child td{border-bottom:none}
+  tfoot td{background:#F8FAFC;border-top:2px solid #0F172A;border-bottom-left-radius:18px;border-bottom-right-radius:18px;padding:16px 18px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:900;font-size:13px;text-align:right;color:#0F172A}
+  tfoot td:first-child{text-align:left}
+  .wrap{border:1px solid #E2E8F0;border-radius:22px;overflow:hidden;background:#fff}
+  .foot{margin-top:30px;display:flex;justify-content:space-between;align-items:center;padding:0 4px;color:#64748B;font-size:11.5px;font-weight:600}
+  @media (max-width:860px){.meta{grid-template-columns:repeat(2,1fr)}.kpis{grid-template-columns:repeat(2,1fr)}.mix-grid{grid-template-columns:1fr}.h1{font-size:26px}.hero{padding:32px 28px}.body{padding:28px}.page{margin:16px auto;padding:0 12px}}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="card">
+    <div class="hero">
+      <div class="hero-inner">
+        <div class="brand">
+          <div class="brand-mark"><img src="/favicon.png" alt="Urugendo" onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<span style=\\"font-size:26px\\">🚌</span>')" /></div>
+          <div>
+            <div class="eyebrow">Urugendo · Revenue & Manifest Report</div>
+            <div class="h1">${session?.agencyName || "Agency"} · ${label}</div>
+            <div class="subtitle">Managed by <b>${session?.name || "Manager"}</b> · ${session?.email || ""} · ${nowStr}</div>
+          </div>
+        </div>
+        <div class="meta">
+          <div class="meta-cell"><div class="meta-label">Reporting Period</div><div class="meta-value">${label}</div></div>
+          <div class="meta-cell"><div class="meta-label">Branches</div><div class="meta-value">${branches.length}</div></div>
+          <div class="meta-cell"><div class="meta-label">Total Passengers</div><div class="meta-value">${rawTotal.passengers.toLocaleString()}</div></div>
+          <div class="meta-cell"><div class="meta-label">Total Revenue</div><div class="meta-value">RWF ${rawTotal.revenue.toLocaleString()}</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="body">
+      <div class="kpis">
+        <div class="kpi"><div class="kpi-accent" style="background:#00B85C"></div><div class="kpi-label">Urugendo Digital</div><div class="kpi-value" style="color:#059669">RWF ${rawTotal.urugendoRevenue.toLocaleString()}</div><div class="kpi-sub"><span class="pill pill-emerald">Pax ${rawTotal.urugendoPassengers.toLocaleString()}</span></div></div>
+        <div class="kpi"><div class="kpi-accent" style="background:#6366F1"></div><div class="kpi-label">Paper Tickets</div><div class="kpi-value" style="color:#4338CA">RWF ${rawTotal.paperRevenue.toLocaleString()}</div><div class="kpi-sub"><span class="pill pill-indigo">Pax ${rawTotal.paperPassengers.toLocaleString()}</span> <span class="text-[10.5px] text-slate-500 ml-1">post-departure only</span></div></div>
+        <div class="kpi"><div class="kpi-accent" style="background:#0F172A"></div><div class="kpi-label">Grand Total</div><div class="kpi-value">RWF ${rawTotal.revenue.toLocaleString()}</div><div class="kpi-sub"><span class="pill pill-slate">${rawTotal.passengers.toLocaleString()} pax</span></div></div>
+        <div class="kpi"><div class="kpi-accent" style="background:#F59E0B"></div><div class="kpi-label">Digital Mix</div><div class="kpi-value">${rawTotal.revenue ? (((rawTotal.urugendoRevenue || 0) / rawTotal.revenue) * 100).toFixed(1) : "0.0"}%</div><div class="kpi-sub">Urugendo share of total revenue</div></div>
+      </div>
+
+      <div class="section-title">Revenue Composition</div>
+      <div class="mix-grid">
+        <div class="mix-card">
+          <div style="display:flex;justify-content:space-between;align-items:baseline"><div class="kpi-label">Passenger Split</div><div style="font-size:11px;color:#64748B;font-weight:700">${rawTotal.passengers.toLocaleString()} total</div></div>
+          <div class="mix-row"><div class="mix-swatch" style="background:#10B981"></div><div class="mix-label">Urugendo Digital Passengers</div><div class="mix-amt">${rawTotal.urugendoPassengers.toLocaleString()}</div></div>
+          <div class="mix-row"><div class="mix-swatch" style="background:#6366F1"></div><div class="mix-label">Paper Ticket Passengers</div><div class="mix-amt">${rawTotal.paperPassengers.toLocaleString()}</div></div>
+          <div class="mix-bar-wrap">
+            <div class="mix-bar" style="background:linear-gradient(90deg,#10B981 0%,#10B981 ${rawTotal.passengers ? ((rawTotal.urugendoPassengers/rawTotal.passengers)*100).toFixed(3):0}%,#6366F1 ${rawTotal.passengers ? ((rawTotal.urugendoPassengers/rawTotal.passengers)*100).toFixed(3):0}%,#6366F1 100%)"></div>
+          </div>
+        </div>
+        <div class="mix-card">
+          <div style="display:flex;justify-content:space-between;align-items:baseline"><div class="kpi-label">Revenue Split (RWF)</div><div style="font-size:11px;color:#64748B;font-weight:700">${formatRwf(rawTotal.revenue)}</div></div>
+          <div class="mix-row"><div class="mix-swatch" style="background:#059669"></div><div class="mix-label">Urugendo Digital Revenue</div><div class="mix-amt">${rawTotal.urugendoRevenue.toLocaleString()}</div></div>
+          <div class="mix-row"><div class="mix-swatch" style="background:#4338CA"></div><div class="mix-label">Paper Ticket Revenue</div><div class="mix-amt">${rawTotal.paperRevenue.toLocaleString()}</div></div>
+          <div class="mix-bar-wrap">
+            <div class="mix-bar" style="background:linear-gradient(90deg,#059669 0%,#059669 ${rawTotal.revenue ? ((rawTotal.urugendoRevenue/rawTotal.revenue)*100).toFixed(3):0}%,#4338CA ${rawTotal.revenue ? ((rawTotal.urugendoRevenue/rawTotal.revenue)*100).toFixed(3):0}%,#4338CA 100%)"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-title">Branch Ranking · All Branches Breakdown</div>
+      <div class="wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Branch / Location</th>
+              <th>Urugendo Pax</th>
+              <th>Urugendo Rev</th>
+              <th>Paper Pax</th>
+              <th>Paper Rev</th>
+              <th>Total Pax</th>
+              <th>Revenue & Share</th>
+              <th>MoMo Code</th>
+            </tr>
+          </thead>
+          <tbody>${branchRowsHtml}</tbody>
+          <tfoot>
+            <tr>
+              <td style="text-align:left;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:900">TOTAL · ${sorted.length} branches</td>
+              <td>${rawTotal.urugendoPassengers.toLocaleString()}</td>
+              <td style="color:#059669">${rawTotal.urugendoRevenue.toLocaleString()}</td>
+              <td>${rawTotal.paperPassengers.toLocaleString()}</td>
+              <td style="color:#4338CA">${rawTotal.paperRevenue.toLocaleString()}</td>
+              <td>${rawTotal.passengers.toLocaleString()}</td>
+              <td style="text-align:right">RWF ${rawTotal.revenue.toLocaleString()}</td>
+              <td>—</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="foot">
+        <div>© ${new Date().getFullYear()} Urugendo · Manifest math: paper revenue computed strictly for trips with departure_time ≤ NOW</div>
+        <div>Generated by Manager: ${session?.name || "Manager"} · Code ${session?.managerCode || "—"}</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>`;
+
+    const htmlBlob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const htmlUrl = URL.createObjectURL(htmlBlob);
+    const aHtml = document.createElement("a");
+    aHtml.href = htmlUrl;
+    aHtml.download = `Urugendo_Report_${timestamp}.html`;
+    aHtml.click();
+    URL.revokeObjectURL(htmlUrl);
+
+    showToast("Report downloaded · HTML + CSV");
   };
 
   const openBranchEditor = (branch: BranchRecord) => {
