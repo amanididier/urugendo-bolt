@@ -34,6 +34,7 @@ export default function AgentProfilePage() {
   const [agentName, setAgentName] = useState("");
   const [agencyName, setAgencyName] = useState("");
   const [branchName, setBranchName] = useState("");
+  const [stationCode, setStationCode] = useState("");
   const [momoCode, setMomoCode] = useState("");
   // Batch 3: real branch contact phone loaded from branches.phone
   const [branchPhone, setBranchPhone] = useState("0796919900");
