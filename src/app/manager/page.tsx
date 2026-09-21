@@ -683,7 +683,7 @@ export default function AgencyManagerApp() {
 
     const sorted = [...branches]
       .map((b) => {
-        const s = periodStats[b.id] ?? {} as any;
+       const s = (periodStats[b.id] ?? {}) as any;
         return {
           branch: b,
           passengers: s.passengers ?? 0,
