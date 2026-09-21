@@ -1045,7 +1045,14 @@ export default function AgencyDashboard() {
         ),
       );
       const confirmedBooking2 = bookings.find((b) => b.id === bookingId);
-      if (confirmedBooking2?.userId) {
+      const { data: verifiedBooking } = await supabase
+        .from("bookings")
+        .select("user_id, payment_status, status")
+        .eq("id", bookingId)
+        .eq("payment_status", "verified")
+        .eq("status", "confirmed")
+        .maybeSingle();
+      if (verifiedBooking?.payment_status === "verified" && confirmedBooking2?.userId) {
         const route2 = confirmedBooking2?.trip
           ? `${(confirmedBooking2.trip as any)?.from || ""} → ${(confirmedBooking2.trip as any)?.to || ""}`
           : "";
