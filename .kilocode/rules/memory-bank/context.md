@@ -54,6 +54,10 @@ The Urugendo app now has separate dashboards for passengers, agency managers, an
 - `bun typecheck` ✅ passes
 - `bun lint` ✅ passes  
 
+## Payment Fix Guardrail
+
+For the pending payment verification fix, change only the required server-side verification API route and the single agency frontend fetch call. Do not touch UI, layouts, working features, helpers, config, or unrelated code.
+
 ## Session History
 
 | Date | Changes |
