@@ -1024,7 +1024,18 @@ export default function AgencyDashboard() {
     // AND status='confirmed' in one DB round-trip. The passenger sees the
     // "Confirmed ✓" badge and payment_status='verified' so the verification
     // queue clears.
-    const success = await markPaymentVerified(bookingId);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const response = await fetch("/api/agency/verify-payment", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session?.access_token || ""}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ bookingId }),
+    });
+    const success = response.ok;
     if (success) {
       setBookings((prev) =>
         prev.map((b) =>
