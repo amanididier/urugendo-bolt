@@ -48,7 +48,7 @@ export async function POST(request: Request) {
 
     const { data: booking, error: bookingError } = await admin
       .from("bookings")
-      .select("id, payment_status")
+      .select("id, payment_status, user_id")
       .eq("id", bookingId)
       .maybeSingle();
     if (bookingError || !booking) {
@@ -68,6 +68,16 @@ export async function POST(request: Request) {
       .eq("payment_status", "submitted");
     if (updateError) {
       return NextResponse.json({ error: "Payment verification failed" }, { status: 500 });
+    }
+
+    if (booking.user_id) {
+      await admin.from("notifications").insert({
+        user_id: booking.user_id,
+        title: "Payment confirmed",
+        message: "Your payment has been verified. Your ticket is ready.",
+        type: "booking",
+        action_url: "/tickets",
+      });
     }
 
     return NextResponse.json({ success: true });
