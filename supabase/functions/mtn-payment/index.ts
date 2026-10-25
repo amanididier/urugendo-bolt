@@ -188,14 +188,10 @@ async function initiatePayment(req: Request, supabase: any, userId: string) {
 
   if (!res.ok && res.status !== 202) {
     const errBody = await res.text();
+    await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", bookingId).eq("user_id", userId);
     return new Response(
-      JSON.stringify({
-        error: `MTN request failed (${res.status}): ${errBody}`,
-      }),
-      {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      },
+      JSON.stringify({ error: `MTN request failed (${res.status}): ${errBody}` }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 
@@ -212,6 +208,7 @@ async function initiatePayment(req: Request, supabase: any, userId: string) {
 
   if (payError) {
     console.error("Failed to record payment:", payError);
+    await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", bookingId).eq("user_id", userId);
     return new Response(JSON.stringify({ error: "MTN accepted the request but payment tracking could not be saved; contact support with reference " + referenceId }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -274,23 +271,19 @@ async function checkPaymentStatus(req: Request, supabase: any, userId: string) {
   );
 
   if (!res.ok) {
-    return new Response(
-      JSON.stringify({
-        status: "pending",
-        message: "Payment still processing",
-      }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      },
-    );
+    if (Date.now() - new Date(payment.booking?.created_at || 0).getTime() >= 15 * 60 * 1000) {
+      await supabase.from("payments").update({ status: "failed" }).eq("id", payment.id);
+      await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", payment.booking_id).eq("user_id", userId);
+      return json({ status: "failed", message: "Payment request expired. The seat reservation has been released." });
+    }
+    return json({ status: "pending", message: "Payment still processing" });
   }
 
   const mtnData = await res.json();
   const mtnStatus = mtnData.status;
   let dbStatus = "pending";
   if (mtnStatus === "SUCCESSFUL") dbStatus = "success";
-  else if (mtnStatus === "FAILED" || mtnStatus === "REJECTED")
+  else if (mtnStatus === "FAILED" || mtnStatus === "REJECTED" || mtnStatus === "EXPIRED")
     dbStatus = "failed";
 
   if (dbStatus !== "pending" && payment) {
