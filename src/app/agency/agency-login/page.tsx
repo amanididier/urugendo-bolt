@@ -478,6 +478,16 @@ function LoginContent() {
         return;
       }
 
+      const { data: agentRegistration, error: registrationError } = await supabase.functions.invoke("agent-registration", {
+        body: { fullName: fullName || authData.user.user_metadata?.full_name || "", operatorId: selectedOperator.id, operatorName: selectedOperator.name, branchName: selectedBranch },
+      });
+      if (registrationError || agentRegistration?.error) {
+        await supabase.auth.signOut();
+        setLoading(false);
+        setError(registrationError?.message || agentRegistration?.error || "Could not verify your agency assignment.");
+        return;
+      }
+
       const { data: profile } = await supabase
         .from("profiles")
         .select("status, role, full_name")
@@ -517,11 +527,7 @@ function LoginContent() {
 
       await supabase
         .from("profiles")
-        .update({
-          full_name: fullName || profile?.full_name,
-          operator_id: selectedOperator.id,
-          branch: selectedBranch || null,
-        })
+        .update({ full_name: fullName || profile?.full_name, branch: selectedBranch || null })
         .eq("id", authData.user.id);
 
       // ── Enrich session: resolve authoritative branch + repair FK ownership ──
