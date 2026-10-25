@@ -249,14 +249,14 @@ export default function PaymentPage() {
                 {state === "success" ? <Check size={28} /> : <Clock size={28} />}
               </div>
               <h3 className="text-[18px] font-black text-slate-900 mb-2">
-                {language === "RW"
-                  ? "Kugenzura Biracyakomeza"
-                  : "Verification in Progress"}
+                {state === "success"
+                  ? (language === "RW" ? "Bika itike yawe" : "Save your e-ticket")
+                  : (language === "RW" ? "Emeza ubwishyu kuri telefoni yawe" : "Approve payment on your phone")}
               </h3>
               <p className="text-[13px] text-slate-600 leading-relaxed mb-4">
-                {language === "RW"
-                  ? `Ubwishyu bwawe burimo kugenzurwa n'abakozi ba ${operatorName}. Tegereza gato.`
-                  : `Approve the MTN prompt on your phone. Your ticket activates once payment is confirmed.`}
+                {state === "success"
+                  ? (language === "RW" ? "Ubwishyu bwemejwe. Bika itike yawe kuri telefoni." : "Payment confirmed. Your e-ticket is ready to save or download.")
+                  : (language === "RW" ? "Emeza ubutumwa bwa MTN MoMo kuri telefoni yawe." : "Approve the MTN MoMo prompt. Your ticket activates after the provider confirms payment.")}
               </p>
               {state !== "success" && <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />}
             </motion.div>
