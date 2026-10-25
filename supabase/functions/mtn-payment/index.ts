@@ -228,6 +228,7 @@ async function checkPaymentStatus(req: Request, supabase: any, userId: string) {
 
   if (payment && payment.status === "failed") return json({ status: "failed", message: "MTN did not confirm the payment. The seat reservation has been released." });
   if (payment && payment.status === "success") {
+    await supabase.from("bookings").update({ status: "confirmed", payment_status: "verified" }).eq("id", payment.booking_id).eq("user_id", userId);
     return new Response(JSON.stringify({ status: "success", payment }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
