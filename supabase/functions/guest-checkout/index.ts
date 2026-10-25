@@ -23,6 +23,7 @@ Deno.serve(async (req: Request) => {
     const url = new URL(req.url);
     const action = url.searchParams.get("action") || "initiate";
     const body = await req.json();
+    if (action === "trips") return await listPublicTrips(body);
     if (action === "ticket") return await getGuestTicket(body);
     if (action === "status") return await getGuestPaymentStatus(body);
     if (action !== "initiate") return json({ error: "Unknown checkout action." }, 400);
@@ -63,6 +64,40 @@ async function mtnAccessToken() {
   if (!response.ok) throw new Error(`MTN token request failed (${response.status}).`);
   return (await response.json()).access_token as string;
 }
+
+async function listPublicTrips(body: any) {
+  const from = String(body.from || "").trim();
+  const to = String(body.to || "").trim();
+  const date = String(body.date || "").trim();
+  let query = supabase.from("trips")
+    .select("id,route_from,route_to,travel_date,date,departure_time,arrival_time,price,currency,total_seats,available_seats,status,operator:operators(name)")
+    .eq("status", "scheduled")
+    .gte("travel_date", new Date().toISOString().slice(0, 10))
+    .order("travel_date", { ascending: true }).limit(100);
+  if (from) query = query.ilike("route_from", `%${from}%`);
+  if (to) query = query.ilike("route_to", `%${to}%`);
+  if (date && /^\\d{4}-\\d{2}-\\d{2}$/.test(date)) query = query.eq("travel_date", date);
+  const { data: trips, error } = await query;
+  if (error) throw new Error("Could not load available trips.");
+  if (!trips?.length) return json({ trips: [] });
+  const ids = trips.map((trip: any) => trip.id);
+  const { data: bookings, error: bookingError } = await supabase.from("bookings")
+    .select("trip_id,passenger_count,status")
+    .in("trip_id", ids)
+    .not("status", "in", '("rejected","cancelled","expired","past")');
+  if (bookingError) throw new Error("Could not calculate seat availability.");
+  const reserved = new Map<string, number>();
+  for (const booking of bookings || []) reserved.set(booking.trip_id, (reserved.get(booking.trip_id) || 0) + Math.max(1, Number(booking.passenger_count || 1)));
+  return json({ trips: trips.map((trip: any) => ({
+    id: trip.id, from: trip.route_from, to: trip.route_to,
+    date: trip.travel_date || trip.date, departureTime: trip.departure_time,
+    arrivalTime: trip.arrival_time, price: Number(trip.price || 0),
+    currency: trip.currency || "RWF", totalSeats: Number(trip.total_seats || 0),
+    availableSeats: Math.max(0, Number(trip.total_seats || 0) - (reserved.get(trip.id) || 0)),
+    operatorName: trip.operator?.name || "Bus operator",
+  })) });
+}
+
 async function initiateGuestCheckout(body: any) {
   const passengerName = String(body.passengerName || "").trim();
   const passengerPhone = normalizePhone(body.passengerPhone);
