@@ -192,7 +192,9 @@ async function initiateGuestCheckout(body: any) {
       bookingId: saved.id, bookingCode: saved.booking_code, guestToken,
       paymentReference: referenceId, paymentStatus: "pending",
       totalAmount: Number(saved.total_amount),
-      message: "Approve the MTN payment prompt on your phone. Your ticket will become active after MTN confirms payment.",
+      message: TARGET_ENV === "sandbox"
+        ? "Sandbox simulation started. No real money moves and no real MoMo PIN prompt is sent; the test status will update automatically."
+        : "Approve the MTN MoMo prompt on your phone. Urugendo never asks for or stores your PIN.",
     }, 202);
   } catch (error: any) {
     await supabase.from("payments").update({ status: "failed" }).eq("provider_reference", referenceId);
