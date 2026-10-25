@@ -15,7 +15,6 @@ export default function SplashScreen() {
   // PWA Install Prompt state
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
-  const [showInstallHelp, setShowInstallHelp] = useState(false);
 
   const continueAsPassenger = () => {
     if (typeof window !== "undefined")
