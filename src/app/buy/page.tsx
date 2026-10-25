@@ -100,7 +100,14 @@ export default function BuyTicketPage() {
       setMessage("Approve the MTN MoMo prompt on your phone. Your ticket stays inactive until payment is confirmed.");
       for (let attempt = 0; attempt < 60; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 3000));
-        const status = await refreshPayment(current);
+        let status: string | undefined;
+        try {
+          status = await refreshPayment(current);
+        } catch {
+          // A temporary status-check outage is not proof that payment failed.
+          setMessage("MTN status is temporarily unavailable. Keep this request open and do not pay again while it is pending.");
+          continue;
+        }
         if (status === "success" || status === "failed") return;
       }
       setMessage("Payment is still pending. You can keep checking here; the ticket will activate only after MTN confirms.");
