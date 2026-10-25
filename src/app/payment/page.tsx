@@ -19,13 +19,7 @@ import {
 } from "lucide-react";
 import { useApp } from "@/context/app-context";
 import { formatPrice, generateShortCode } from "@/lib/data";
-import {
-  createBooking,
-  decrementAvailableSeats,
-  normalizePhone,
-} from "@/lib/api";
-import { markPaymentSubmitted } from "@/lib/paymentProvider";
-import { notifyUser } from "@/lib/notificationsService";
+import { normalizePhone } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { t } from "@/lib/translations";
 
@@ -73,22 +67,6 @@ export default function PaymentPage() {
   // Pilot Phase Signup Notification Popup State (Rule 2)
   const [showPilotPopup, setShowPilotPopup] = useState(false);
 
-  // Guard: Automatically redirect to login if not logged in & trigger pilot popup
-  useEffect(() => {
-    const savedLogin =
-      typeof window !== "undefined"
-        ? localStorage.getItem("urugendo_is_logged_in")
-        : null;
-    const effectiveLoggedIn = isLoggedIn || savedLogin === "true";
-
-    if (!effectiveLoggedIn) {
-      // Fast-trigger modal within 0.5 seconds as requested by Rule 2
-      const timer = setTimeout(() => {
-        setShowPilotPopup(true);
-      }, 400);
-      return () => clearTimeout(timer);
-    }
-  }, [isLoggedIn]);
 
   // Load branch MoMo code: branch table is source of truth (set by manager), NULL means not yet configured
   useEffect(() => {
@@ -175,180 +153,63 @@ export default function PaymentPage() {
   const handlePay = async () => {
     setError("");
     const cleanPhone = normalizePhone(phone);
-    if (!cleanPhone) {
-      setError("Enter a valid MTN number (e.g. 0788123456 or 250788123456)");
-      return;
-    }
-    if (!momoName.trim()) {
-      setError(
-        "Please enter the exact name registered on your MTN MoMo account.",
-      );
-      return;
-    }
+    if (!cleanPhone) { setError("Enter a valid Rwanda mobile number (e.g. 0788123456 or 250788123456)."); return; }
+    if (!editablePassengerName.trim()) { setError("Enter the passenger's full name."); return; }
+    if (!momoName.trim()) { setError("Enter the name registered on the MTN MoMo account."); return; }
 
     setState("initiating");
-
-    // Batch 4: semi-automated USSD flow.
-    // The user has already paid via *182# to the branch's MoMo code shown
-    // on this page. We do NOT call any live MTN/Airtel Edge Function —
-    // we just create the booking row with status='pending' and
-    // payment_status='submitted', and the station agent verifies the
-    // MoMo SMS receipt from their dashboard.
     try {
-      const shortCode = generateShortCode();
-      const bookingPayload = {
-        trip: selectedTrip,
-        seat: selectedSeat,
-        passengerName: editablePassengerName,
-        passengerPhone: cleanPhone,
-        momoName: momoName,
-        momoNumber: cleanPhone,
-        shortCode,
-        paymentMethod: "MTN MoMo",
-        totalAmount: total,
-        bookingFee,
-        status: "pending",
-        bookingDate: new Date().toISOString().split("T")[0],
-        groupPassengers: groupPassengers,
-      };
-
-      const localBookingId = addBooking(bookingPayload);
-      const dbResult = await createBooking(bookingPayload);
-      if (dbResult.error === "SIGN_IN_REQUIRED") {
-        setState("failed");
-        setError("Please sign in to confirm your booking.");
-        setTimeout(() => {
-          router.push("/user-login?redirect=/payment");
-        }, 1500);
-        return;
-      }
-      if (!dbResult.id) {
-        console.error("[payment] createBooking returned no id:", dbResult.error || "unknown DB error");
-        setState("failed");
-        setError(dbResult.error ? `Booking failed: ${dbResult.error}` : "Booking failed — please try again.");
-        return;
-      }
-      const dbBookingId = dbResult.id;
-      // createBooking already sets payment_status='submitted'; extra call is redundant but safe to keep.
-      await markPaymentSubmitted(dbBookingId);
-      try { await decrementAvailableSeats(selectedTrip.id); } catch {}
-
-      setReferenceId(shortCode);
-      setState("success");
+      const { data, error: invokeError } = await supabase.functions.invoke("guest-checkout", {
+        body: {
+          tripId: selectedTrip.id,
+          passengerName: editablePassengerName.trim(),
+          passengerPhone: cleanPhone,
+          passengerCount: groupCount,
+          momoName: momoName.trim(),
+          momoNumber: cleanPhone,
+        },
+      });
+      if (invokeError) throw new Error(invokeError.message || "Could not start MTN checkout.");
+      if (data?.error) throw new Error(data.error);
+      if (!data?.bookingId || !data?.guestToken) throw new Error("Checkout did not return secure ticket access.");
+      const ticketUrl = `/ticket/${encodeURIComponent(data.bookingId)}?access=${encodeURIComponent(data.guestToken)}&download=1`;
+      setReferenceId(data.paymentReference || data.bookingCode || "");
+      setState("awaiting_approval");
       setVerificationPopup(true);
 
-      // DB notification: passenger sees Facebook-style slide-down via NotificationToast + bell
-      const { data: authData } = await supabase.auth.getUser();
-      if (authData.user && dbBookingId) {
-        const route = `${selectedTrip.from} → ${selectedTrip.to}`;
-        const date = new Date(selectedTrip.date || Date.now()).toLocaleDateString();
-        await notifyUser({
-          userId: authData.user.id,
-          title: "⏳ Awaiting Verification",
-          message: `Your MoMo payment for the ${route} trip on ${date} was received. The ${operatorName} agent will verify and confirm your ticket (Code: ${shortCode}) shortly.`,
-          type: "booking",
-          actionUrl: `/ticket/${dbBookingId}`,
+      // Poll the server-side MTN status; never mark a ticket paid from the browser alone.
+      for (let attempt = 0; attempt < 12; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        const { data: statusData, error: statusError } = await supabase.functions.invoke("guest-checkout?action=status", {
+          body: { bookingId: data.bookingId, guestToken: data.guestToken },
         });
-        // Poke System Notification permission gate once (the toast will also trigger it via realtime)
-        if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
-          Notification.requestPermission().catch(() => {});
+        if (statusError) continue;
+        if (statusData?.status === "success") {
+          setState("success");
+          setVerificationPopup(true);
+          setTimeout(() => router.push(ticketUrl), 1500);
+          return;
+        }
+        if (statusData?.status === "failed") {
+          setState("failed");
+          setVerificationPopup(false);
+          setError(statusData.message || "MTN did not confirm the payment. Your reservation has been released.");
+          return;
         }
       }
 
-      const navigateId = dbBookingId || localBookingId;
-      setTimeout(() => {
-        setVerificationPopup(false);
-        router.push(`/tickets?pending=true&id=${navigateId}`);
-      }, 3000);
+      // Keep the ticket link available while MTN finishes asynchronously; the ticket remains inactive until confirmed.
+      setVerificationPopup(false);
+      router.push(ticketUrl);
     } catch (err) {
       setState("failed");
-      setError(err instanceof Error ? err.message : "Payment failed");
+      setVerificationPopup(false);
+      setError(err instanceof Error ? err.message : "Checkout failed. Please try again.");
     }
   };
 
   return (
     <div className="bg-white min-h-screen font-sans pb-32">
-      {/* Pilot Phase Free Sign-Up Notification Popup (Rule 2) */}
-      <AnimatePresence>
-        {showPilotPopup && (
-          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="w-full max-w-sm bg-white rounded-[32px] p-6 shadow-2xl relative"
-            >
-              <button
-                onClick={() => setShowPilotPopup(false)}
-                className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 cursor-pointer"
-              >
-                <X size={18} />
-              </button>
-              <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-4">
-                <Sparkles size={24} />
-              </div>
-              <h3 className="text-[18px] font-black text-slate-900 mb-2">
-                {language === "RW"
-                  ? "Inyungu za Pilot 🎉"
-                  : "Pilot Phase Perk 🎉"}
-              </h3>
-              <p className="text-[13px] text-slate-600 leading-relaxed mb-5">
-                {language === "RW"
-                  ? "Twagabanyije amafaranga y'itike ukwezi kose! Iyandikishe cyangwa winjire ubu kugira ngo ubike itike yawe ubuntu mbemeza kwishyura."
-                  : "We're waiving the 3% booking service fee for the entire month! Sign up or log in now to lock in your free booking instantly before confirming your payment."}
-              </p>
-              <div className="space-y-2.5">
-                <button
-                  onClick={() => router.push("/user-login?redirect=/payment")}
-                  className="w-full h-12 bg-primary text-white font-bold text-[14px] rounded-2xl shadow-lg shadow-primary/25 flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  {language === "RW"
-                    ? "Injira / Iyandikishe"
-                    : "Quick Phone/Email Sign In"}{" "}
-                  <ArrowRight size={16} />
-                </button>
-                <button
-                  onClick={async () => {
-                    try {
-                      await supabase.auth.signInWithOAuth({
-                        provider: "google",
-                        options: {
-                          redirectTo: `${window.location.origin}/payment`,
-                        },
-                      });
-                    } catch {
-                      router.push("/user-login?redirect=/payment");
-                    }
-                  }}
-                  className="w-full h-12 bg-slate-100 text-slate-900 font-bold text-[14px] rounded-2xl flex items-center justify-center gap-2 hover:bg-slate-200 cursor-pointer"
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24">
-                    <path
-                      fill="#4285F4"
-                      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
-                    />
-                    <path
-                      fill="#34A853"
-                      d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.13 0-5.78-2.11-6.73-4.96H1.18v3.15C3.17 21.32 7.23 24 12 24z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M5.27 14.24c-.25-.72-.38-1.49-.38-2.24s.13-1.52.38-2.24V6.6H1.18C.43 8.12 0 9.82 0 12s.43 3.88 1.18 5.4l4.09-3.16z"
-                    />
-                    <path
-                      fill="#EA4335"
-                      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.23 0 3.17 2.68 1.18 6.6l4.09 3.15c.95-2.85 3.6-4.96 6.73-4.96z"
-                    />
-                  </svg>
-                  {language === "RW"
-                    ? "Injiriha ukoresheje Google"
-                    : "1-Tap Google Sign-in"}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* Group Names Modal Popup */}
       {showGroupModal && (
@@ -651,7 +512,7 @@ export default function PaymentPage() {
         <p className="text-[12px] font-semibold text-slate-800 opacity-90">
           {language === "RW"
             ? `Kode y'ishami rya ${operatorName}. Koresha wandika cyangwa wemeze hasi.`
-            : `Branch Scheduled Code for ${operatorName}. Dial directly or complete automatic prompt below.`}
+            : `A secure MTN MoMo prompt will be sent to your phone. Approve it to activate your ticket.`}
         </p>
       </motion.div>
 
