@@ -47,7 +47,12 @@ export default function SplashScreen() {
   }, []);
 
   const handleInstallApp = async () => {
-    if (!deferredPrompt) { setShowInstallHelp(true); return; }
+    if (!deferredPrompt) {
+      window.alert(language === "RW"
+        ? "Fungura urubuga muri Chrome cyangwa Safari, hanyuma uhitemo Add to Home Screen. Play Store na App Store bizongerwamo porogaramu nizimara gusohoka."
+        : "Open this site in Chrome or Safari and choose Add to Home Screen. Play Store and App Store links will be added after the native apps are published.");
+      return;
+    }
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
     console.log(`User ${outcome} installing app`);
@@ -145,24 +150,7 @@ export default function SplashScreen() {
             </button>
           </div>
 
-          <AnimatePresence>
-            {showInstallHelp && (
-              <motion.div
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-5"
-              >
-                <div className="w-full max-w-sm rounded-3xl bg-white text-slate-900 p-6 shadow-2xl">
-                  <h3 className="text-lg font-black mb-2">{language === "RW" ? "Manura Urugendo" : "Get Urugendo on your phone"}</h3>
-                  <p className="text-sm leading-relaxed text-slate-600 mb-4">
-                    {deferredPrompt
-                      ? (language === "RW" ? "Ongeraho Urugendo kuri ecran yawe yo gutangiriraho." : "Install Urugendo for quick access from your home screen.")
-                      : (language === "RW" ? "Fungura urubuga muri Chrome cyangwa Safari, hanyuma uhitemo Add to Home Screen. Porogaramu ntirashyirwa kuri Play Store cyangwa App Store." : "Open this site in Chrome or Safari and choose Add to Home Screen. Store downloads will be linked here once the native apps are published.")}
-                  </p>
-                  <button onClick={() => setShowInstallHelp(false)} className="w-full rounded-xl bg-[#00B85C] text-white font-bold py-3">{language === "RW" ? "Nibyo" : "Got it"}</button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          
 
           {/* PWA Install Banner — Apple-level slide-down card with favicon */}
           <AnimatePresence>
