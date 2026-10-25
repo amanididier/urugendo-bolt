@@ -194,7 +194,9 @@ async function initiatePayment(req: Request, supabase: any, userId: string) {
       await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", bookingId).eq("user_id", userId);
       return json({ error: `MTN request failed (${res.status}): ${errBody}` }, 400);
     }
-    return json({ referenceId, status: "pending", message: "Payment request sent to customer's phone. They must approve it." }, 202);
+    return json({ referenceId, status: "pending", message: TARGET_ENV === "sandbox"
+      ? "Sandbox simulation started. No real money moves and no real MoMo PIN prompt is sent."
+      : "Payment request sent to the customer's phone. They must approve it in MTN MoMo." }, 202);
   } catch (error: any) {
     await supabase.from("payments").update({ status: "failed" }).eq("provider_reference", referenceId);
     await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", bookingId).eq("user_id", userId);
