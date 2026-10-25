@@ -50,7 +50,7 @@ const isDepartureTimeValid = (tripDate?: string, departureTime?: string) => {
 
 export default function SearchPage() {
   const router = useRouter();
-  const { search, setSelectedTrip, language } = useApp();
+  const { search, setSelectedTrip, setSelectedSeat, language } = useApp();
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
