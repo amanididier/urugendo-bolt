@@ -97,7 +97,7 @@ export default function BuyTicketPage() {
       if (!data?.bookingId || !data?.guestToken) throw new Error("Checkout did not return secure ticket access.");
       const current: Checkout = { bookingId: data.bookingId, guestToken: data.guestToken, bookingCode: data.bookingCode, paymentReference: data.paymentReference, totalAmount: Number(data.totalAmount || trip.price * count) };
       setCheckout(current); setPhase("waiting");
-      setMessage("Approve the MTN MoMo prompt on your phone. Your ticket stays inactive until payment is confirmed.");
+      setMessage(data?.message || "Waiting for MTN payment confirmation. Your ticket stays inactive until payment is confirmed.");
       for (let attempt = 0; attempt < 60; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 3000));
         let status: string | undefined;
