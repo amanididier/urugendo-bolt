@@ -254,11 +254,7 @@ function AgencyScheduleContent() {
   const activeTrip = trips.find((t) => t.id === selectedTripId) || specificTrip;
 
   useEffect(() => {
-    if (userRole === "agent") {
-      loadTrips();
-    } else {
-      router.push("/agency/agency-login");
-    }
+    router.replace("/manager");
   }, [userRole, router, loadTrips]);
 
   useEffect(() => {
