@@ -824,6 +824,7 @@ export default function TicketDetailPage() {
                   level={"M"}
                   includeMargin={false}
                 />
+                {isUsed && <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><div className="w-9 h-9 rounded-full bg-[#00B14F] text-white flex items-center justify-center shadow-md"><CheckCheck size={20} /></div></div>
               </div>
               <span className="text-[10px] font-semibold text-slate-500 mt-2 flex items-center gap-1">
                 <QrCode size={12} className="text-slate-400" />
