@@ -1944,6 +1944,7 @@ export default function AgencyManagerApp() {
           [
             { key: "home" as Tab, label: "Dashboard", icon: LayoutDashboard },
             { key: "branches" as Tab, label: "Branches", icon: Building2 },
+            { key: "schedule" as Tab, label: "Schedule", icon: Calendar },
             { key: "profile" as Tab, label: "Profile", icon: User },
           ]
         ).map(({ key, label, icon: Icon }) => {
