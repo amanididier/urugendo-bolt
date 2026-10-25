@@ -44,8 +44,10 @@ Deno.serve(async (req: Request) => {
     if (!Number.isFinite(price) || price <= 0 || price > 1000000) return json({ error: "Fare must be greater than zero." }, 400);
     if (!Number.isInteger(totalSeats) || totalSeats < 1 || totalSeats > 100) return json({ error: "Capacity must be between 1 and 100 seats." }, 400);
 
-    const { data: origin } = await db.from("branches").select("id,name,location").or(`name.ilike."${from}",location.ilike."${from}"`).limit(1).maybeSingle();
-    const { data: destination } = await db.from("branches").select("id,name,location").or(`name.ilike."${to}",location.ilike."${to}"`).limit(1).maybeSingle();
+    let { data: origin } = await db.from("branches").select("id,name,location").ilike("name", from).limit(1).maybeSingle();
+    if (!origin) { const result = await db.from("branches").select("id,name,location").ilike("location", from).limit(1).maybeSingle(); origin = result.data; }
+    let { data: destination } = await db.from("branches").select("id,name,location").ilike("name", to).limit(1).maybeSingle();
+    if (!destination) { const result = await db.from("branches").select("id,name,location").ilike("location", to).limit(1).maybeSingle(); destination = result.data; }
     const payload = {
       operator_id: operator.id, route_from: from, route_to: to,
       from, to, travel_date: travelDate, date: travelDate,
