@@ -4,6 +4,17 @@
 ALTER TABLE public.bookings
   ADD COLUMN IF NOT EXISTS passenger_count integer NOT NULL DEFAULT 1;
 
+-- The live PWA schema's payments table predates MTN provider tracking.
+ALTER TABLE public.payments
+  ADD COLUMN IF NOT EXISTS provider text,
+  ADD COLUMN IF NOT EXISTS phone_number text,
+  ADD COLUMN IF NOT EXISTS currency text NOT NULL DEFAULT 'RWF',
+  ADD COLUMN IF NOT EXISTS provider_reference text;
+
+CREATE UNIQUE INDEX IF NOT EXISTS payments_provider_reference_unique
+  ON public.payments (provider_reference)
+  WHERE provider_reference IS NOT NULL;
+
 ALTER TABLE public.bookings
   DROP CONSTRAINT IF EXISTS bookings_passenger_count_positive;
 ALTER TABLE public.bookings
