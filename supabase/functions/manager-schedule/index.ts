@@ -23,6 +23,28 @@ Deno.serve(async (req: Request) => {
     const { data: operator, error: operatorError } = await db.from("operators")
       .select("id,name").ilike("name", String(session.manager.agency_name || "")).maybeSingle();
     if (operatorError || !operator) return json({ error: "This manager's agency is not configured in the operators table yet." }, 409);
+    if (action === "list-agents") {
+      const { data: agents, error } = await db.from("agency_agents")
+        .select("id,name,email,branch_name,phone,created_at,is_approved,status")
+        .eq("agency_name", String(session.manager.agency_name || ""))
+        .eq("is_approved", false)
+        .order("created_at", { ascending: false }).limit(100);
+      if (error) throw error;
+      return json({ agents: agents || [] });
+    }
+    if (action === "approve-agent") {
+      const agentId = String(body.agentId || "");
+      if (!agentId) return json({ error: "Agent ID is required." }, 400);
+      const { data: updated, error } = await db.from("agency_agents")
+        .update({ is_approved: true, status: "approved" })
+        .eq("id", agentId)
+        .eq("agency_name", String(session.manager.agency_name || ""))
+        .eq("is_approved", false)
+        .select("id,name").maybeSingle();
+      if (error) throw error;
+      if (!updated) return json({ error: "Agent not found for this agency or already approved." }, 404);
+      return json({ ok: true, agent: updated });
+    }
     if (action === "list") {
       const { data, error } = await db.from("trips")
         .select("id,route_from,route_to,travel_date,departure_time,arrival_time,price,total_seats,available_seats,status,origin_branch,origin_branch_id,destination_branch,destination_branch_id")
