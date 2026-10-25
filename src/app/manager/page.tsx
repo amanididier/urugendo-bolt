@@ -51,7 +51,7 @@ import {
 /* ------------------------------------------------------------------ */
 
 type TimePeriod = "today" | "monthly" | "yearly" | "custom";
-type Tab = "home" | "branches" | "profile";
+type Tab = "home" | "branches" | "schedule" | "profile";
 
 // Agent record as stored in the DB
 interface PendingAgent {
@@ -197,6 +197,89 @@ function SectionHeader({
 /* ------------------------------------------------------------------ */
 /*  Main Component                                                     */
 /* ------------------------------------------------------------------ */
+
+
+function ManagerSchedulePanel({ sessionToken, agencyName }: { sessionToken: string; agencyName: string }) {
+  const [trips, setTrips] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [date, setDate] = useState(new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Kigali" }));
+  const [departureTime, setDepartureTime] = useState("08:00");
+  const [price, setPrice] = useState("3500");
+  const [totalSeats, setTotalSeats] = useState("29");
+
+  const loadTrips = useCallback(async () => {
+    if (!sessionToken) { setError("Your manager session has expired. Sign in again."); setLoading(false); return; }
+    setLoading(true); setError("");
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke("manager-schedule", {
+        body: { action: "list", sessionToken },
+      });
+      if (invokeError || data?.error) throw new Error(invokeError?.message || data?.error || "Could not load trips.");
+      setTrips(Array.isArray(data?.trips) ? data.trips : []);
+    } catch (e: any) { setError(e?.message || "Could not load trips."); }
+    finally { setLoading(false); }
+  }, [sessionToken]);
+
+  useEffect(() => { loadTrips(); }, [loadTrips]);
+
+  const createTrip = async () => {
+    setError(""); setNotice("");
+    if (!from.trim() || !to.trim() || from.trim().toLowerCase() === to.trim().toLowerCase()) { setError("Enter different origin and destination towns."); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Kigali" })) { setError("Choose today or a future date."); return; }
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(departureTime)) { setError("Use 24-hour time, for example 08:30."); return; }
+    if (!Number.isFinite(Number(price)) || Number(price) <= 0) { setError("Enter a valid RWF fare."); return; }
+    if (!Number.isInteger(Number(totalSeats)) || Number(totalSeats) < 1 || Number(totalSeats) > 100) { setError("Capacity must be between 1 and 100 seats."); return; }
+    setSaving(true);
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke("manager-schedule", {
+        body: { action: "create", sessionToken, trip: { from: from.trim(), to: to.trim(), date, departureTime, price: Number(price), totalSeats: Number(totalSeats) } },
+      });
+      if (invokeError || data?.error) throw new Error(invokeError?.message || data?.error || "Could not publish trip.");
+      setNotice("Trip published. Passenger availability now follows this capacity.");
+      setFrom(""); setTo("");
+      await loadTrips();
+    } catch (e: any) { setError(e?.message || "Could not publish trip."); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="space-y-4 px-4 pb-28 pt-4">
+      <div className="flex items-center justify-between gap-3">
+        <div><h1 className="text-xl font-extrabold text-text-primary">Trip schedule</h1><p className="text-xs text-text-muted mt-1">{agencyName} · Branch Manager</p></div>
+        <button onClick={loadTrips} className="rounded-xl border border-border bg-white px-3 py-2 text-xs font-bold">Refresh</button>
+      </div>
+      <div className="rounded-2xl border border-border bg-white p-4 space-y-3">
+        <h2 className="font-extrabold text-sm">Publish a bus trip</h2>
+        <p className="text-xs leading-5 text-text-muted">The total seat count you enter is the trip capacity used by passenger checkout. Travellers do not choose seat numbers.</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="text-xs font-bold text-text-muted">FROM<input value={from} onChange={e=>setFrom(e.target.value)} placeholder="Kigali" className="mt-1 w-full rounded-xl border border-border px-3 py-3 text-sm text-text-primary outline-none focus:border-primary"/></label>
+          <label className="text-xs font-bold text-text-muted">TO<input value={to} onChange={e=>setTo(e.target.value)} placeholder="Musanze" className="mt-1 w-full rounded-xl border border-border px-3 py-3 text-sm text-text-primary outline-none focus:border-primary"/></label>
+          <label className="text-xs font-bold text-text-muted">TRAVEL DATE<input type="date" value={date} onChange={e=>setDate(e.target.value)} className="mt-1 w-full rounded-xl border border-border px-3 py-3 text-sm text-text-primary outline-none focus:border-primary"/></label>
+          <label className="text-xs font-bold text-text-muted">DEPARTURE TIME<input type="time" value={departureTime} onChange={e=>setDepartureTime(e.target.value)} className="mt-1 w-full rounded-xl border border-border px-3 py-3 text-sm text-text-primary outline-none focus:border-primary"/></label>
+          <label className="text-xs font-bold text-text-muted">FARE PER PASSENGER (RWF)<input type="number" min="1" value={price} onChange={e=>setPrice(e.target.value)} className="mt-1 w-full rounded-xl border border-border px-3 py-3 text-sm text-text-primary outline-none focus:border-primary"/></label>
+          <label className="text-xs font-bold text-text-muted">TOTAL BUS CAPACITY<input type="number" min="1" max="100" value={totalSeats} onChange={e=>setTotalSeats(e.target.value)} className="mt-1 w-full rounded-xl border border-border px-3 py-3 text-sm text-text-primary outline-none focus:border-primary"/></label>
+        </div>
+        {error && <p className="text-sm text-red-700">{error}</p>}
+        {notice && <p className="text-sm text-emerald-700">{notice}</p>}
+        <button onClick={createTrip} disabled={saving} className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-extrabold text-white disabled:opacity-60">{saving ? "Publishing…" : "Publish trip"}</button>
+      </div>
+      <div className="rounded-2xl border border-border bg-white p-4">
+        <h2 className="font-extrabold text-sm">Scheduled trips</h2>
+        {loading ? <p className="py-5 text-sm text-text-muted">Loading trips…</p> : trips.length === 0 ? <p className="py-5 text-sm text-text-muted">No trips scheduled for this agency yet.</p> :
+          <div className="mt-3 divide-y divide-border">{trips.map(trip=><div key={trip.id} className="py-3 first:pt-0 last:pb-0">
+            <div className="flex items-start justify-between gap-3"><p className="font-bold text-sm text-text-primary">{trip.route_from} → {trip.route_to}</p><span className="text-xs font-bold text-primary">{trip.status}</span></div>
+            <p className="mt-1 text-xs text-text-muted">{trip.travel_date} · {trip.departure_time || "Time TBC"}</p>
+            <p className="mt-1 text-xs text-text-muted">{Number(trip.price || 0).toLocaleString()} RWF · {trip.available_seats} / {trip.total_seats} seats available</p>
+          </div>)}</div>}
+      </div>
+    </div>
+  );
+}
 
 export default function AgencyManagerApp() {
   const router = useRouter();
@@ -1282,6 +1365,10 @@ export default function AgencyManagerApp() {
         )}
 
         {/* ── PROFILE ─────────────────────────────────────────── */}
+        {activeTab === "schedule" && (
+          <ManagerSchedulePanel sessionToken={session?.sessionToken || ""} agencyName={session?.agencyName || ""} />
+        )}
+
         {activeTab === "profile" && (
           <div className="p-5 space-y-5 pt-10">
             <SectionHeader
