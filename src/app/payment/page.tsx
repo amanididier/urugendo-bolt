@@ -49,7 +49,7 @@ export default function PaymentPage() {
   const [phone, setPhone] = useState(userPhone || "");
   const [momoName, setMomoName] = useState(userName || "");
   const [editablePassengerName, setEditablePassengerName] = useState(
-    userName || "Traveler",
+    userName || "",
   );
   const [isEditingName, setIsEditingName] = useState(false);
   const [state, setState] = useState<PayState>("idle");
@@ -134,7 +134,7 @@ export default function PaymentPage() {
     );
   }
 
-  const isFreePromo = isLoggedIn;
+  const isFreePromo = true;
   const bookingFee = isFreePromo ? 0 : Math.round(selectedTrip.price * 0.025);
   const perPersonTotal = selectedTrip.price + bookingFee;
   const total = perPersonTotal * groupCount;
@@ -172,7 +172,7 @@ export default function PaymentPage() {
       if (invokeError) throw new Error(invokeError.message || "Could not start MTN checkout.");
       if (data?.error) throw new Error(data.error);
       if (!data?.bookingId || !data?.guestToken) throw new Error("Checkout did not return secure ticket access.");
-      const ticketUrl = `/ticket/${encodeURIComponent(data.bookingId)}?access=${encodeURIComponent(data.guestToken)}&download=1`;
+      const ticketUrl = `/ticket/${encodeURIComponent(data.bookingId)}#access=${encodeURIComponent(data.guestToken)}`;
       setReferenceId(data.paymentReference || data.bookingCode || "");
       setState("awaiting_approval");
       setVerificationPopup(true);
@@ -295,16 +295,16 @@ export default function PaymentPage() {
                 <Clock size={28} />
               </div>
               <h3 className="text-[18px] font-black text-slate-900 mb-2">
-                {language === "RW"
-                  ? "Kugenzura Biracyakomeza"
-                  : "Verification in Progress"}
+                {state === "success"
+                  ? (language === "RW" ? "Bika itike yawe" : "Save your e-ticket")
+                  : (language === "RW" ? "Emeza ubwishyu kuri telefoni yawe" : "Approve payment on your phone")}
               </h3>
               <p className="text-[13px] text-slate-600 leading-relaxed mb-4">
                 {language === "RW"
                   ? `Ubwishyu bwawe burimo kugenzurwa n'abakozi ba ${operatorName}. Tegereza gato.`
                   : `Your payment is pending verification by ${operatorName} station agents. Please wait while your ticket enters verification.`}
               </p>
-              <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+              {state !== "success" && <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />}
             </motion.div>
           </div>
         )}
@@ -494,6 +494,7 @@ export default function PaymentPage() {
       </motion.div>
 
       {/* MTN MoMo Code Card */}
+      {false && (
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -515,8 +516,9 @@ export default function PaymentPage() {
             : `A secure MTN MoMo prompt will be sent to your phone. Approve it to activate your ticket.`}
         </p>
       </motion.div>
+      )}
 
-      {/* Phone & MoMo Name Input */}
+{/* Phone & MoMo Name Input */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -590,8 +592,7 @@ export default function PaymentPage() {
             state === "initiating" ||
             state === "awaiting_approval" ||
             state === "polling" ||
-            !phone ||
-            !branchMomoCode
+            !phone
           }
           className={`w-full h-14 rounded-2xl font-extrabold text-[15px] flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg ${
             state === "initiating" ||
