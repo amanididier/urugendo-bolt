@@ -205,10 +205,22 @@ async function getGuestPaymentStatus(body: any) {
     const response = await fetch(`${MTN_BASE}/collection/v1_0/requesttopay/${payment.provider_reference}`, {
       headers: { Authorization: `Bearer ${token}`, "X-Target-Environment": TARGET_ENV, "Ocp-Apim-Subscription-Key": SUBSCRIPTION_KEY! },
     });
-    if (!response.ok) return json({ status: "pending", message: "Waiting for MTN confirmation." });
+    if (!response.ok) {
+      if (Date.now() - new Date(booking.created_at).getTime() >= 15 * 60 * 1000) {
+        await supabase.from("payments").update({ status: "failed" }).eq("id", payment.id);
+        await supabase.from("bookings").update({ status: "expired", payment_status: "expired" }).eq("id", booking.id);
+        return json({ status: "failed", message: "Payment request expired. The seat reservation has been released." });
+      }
+      return json({ status: "pending", message: "Waiting for MTN confirmation." });
+    }
     mtnStatus = (await response.json()).status || "PENDING";
   } catch {
     return json({ status: "pending", message: "Waiting for MTN confirmation." });
+  }
+  if (mtnStatus !== "SUCCESSFUL" && !["FAILED", "REJECTED", "EXPIRED"].includes(mtnStatus) && Date.now() - new Date(booking.created_at).getTime() >= 15 * 60 * 1000) {
+    await supabase.from("payments").update({ status: "failed" }).eq("id", payment.id);
+    await supabase.from("bookings").update({ status: "expired", payment_status: "expired" }).eq("id", booking.id);
+    return json({ status: "failed", message: "Payment request expired. The seat reservation has been released." });
   }
   if (mtnStatus === "SUCCESSFUL") {
     await supabase.from("payments").update({ status: "success" }).eq("id", payment.id);
