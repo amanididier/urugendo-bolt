@@ -35,6 +35,17 @@ import type { Booking } from "@/lib/types";
 // The loadTicket effect queries branches.phone via the booking's branchId FK.
 const DEFAULT_PHONE = "+250 000 000 000";
 
+function mapGuestBooking(row: any): Booking {
+  return {
+    id: row.id, shortCode: row.shortCode || row.bookingCode,
+    passengerName: row.passengerName, passengerPhone: row.passengerPhone,
+    seat: row.seatLabel, totalAmount: row.totalAmount,
+    status: row.status, paymentStatus: row.paymentStatus,
+    bookingDate: row.bookingDate, branchId: row.branchId,
+    momoAccountName: row.momoAccountName, trip: row.trip,
+  } as unknown as Booking;
+}
+
 // Multilingual Translations Dictionary
 const translations = {
   en: {
@@ -188,15 +199,7 @@ export default function TicketDetailPage() {
           await supabase.functions.invoke('guest-checkout?action=status', { body: { bookingId, guestToken } });
           const { data: guestData, error: guestError } = await supabase.functions.invoke('guest-checkout?action=ticket', { body: { bookingId, guestToken } });
           if (!guestError && guestData?.booking) {
-            const row = guestData.booking;
-            found = {
-              id: row.id, shortCode: row.shortCode || row.bookingCode,
-              passengerName: row.passengerName, passengerPhone: row.passengerPhone,
-              seat: row.seatLabel, totalAmount: row.totalAmount,
-              status: row.status, paymentStatus: row.paymentStatus,
-              bookingDate: row.bookingDate, branchId: row.branchId,
-              momoAccountName: row.momoAccountName, trip: row.trip,
-            } as unknown as Booking;
+            found = mapGuestBooking(guestData.booking);
           }
         } else {
           found = await fetchBookingById(bookingId);
@@ -247,6 +250,28 @@ export default function TicketDetailPage() {
     }
 
     if (bookingId) loadTicket();
+  }, [bookingId, guestToken]);
+
+  useEffect(() => {
+    if (!guestToken || !bookingId) return;
+    let attempts = 0;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      attempts += 1;
+      try {
+        const { data: statusData } = await supabase.functions.invoke('guest-checkout?action=status', { body: { bookingId, guestToken } });
+        if (cancelled) return;
+        if (statusData?.status === 'success' || statusData?.status === 'failed' || attempts >= 20) {
+          const { data: ticketData } = await supabase.functions.invoke('guest-checkout?action=ticket', { body: { bookingId, guestToken } });
+          if (ticketData?.booking && !cancelled) setBooking(mapGuestBooking(ticketData.booking));
+        } else if (!cancelled) timer = setTimeout(poll, 3000);
+      } catch {
+        if (!cancelled && attempts < 20) timer = setTimeout(poll, 3000);
+      }
+    };
+    timer = setTimeout(poll, 3000);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [bookingId, guestToken]);
 
   const copyShortCode = () => {
