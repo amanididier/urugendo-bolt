@@ -289,7 +289,7 @@ export default function PaymentPage() {
               className="w-full max-w-sm bg-white rounded-[32px] p-6 text-center shadow-2xl"
             >
               <div className="w-14 h-14 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
-                <Clock size={28} />
+                {state === "success" ? <Check size={28} /> : <Clock size={28} />}
               </div>
               <h3 className="text-[18px] font-black text-slate-900 mb-2">
                 {language === "RW"
