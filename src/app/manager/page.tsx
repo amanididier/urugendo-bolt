@@ -320,7 +320,7 @@ export default function AgencyManagerApp() {
     } catch (err) {
       console.warn("[manager] pending agents fetch error:", err);
     }
-  }, [session?.agencyName]);
+  }, [session?.agencyName, session?.sessionToken]);
 
   useEffect(() => {
     if (checkingSession) return;
