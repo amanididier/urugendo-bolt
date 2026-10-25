@@ -73,6 +73,23 @@ async function initiateGuestCheckout(body: any) {
   if (!Number.isInteger(passengerCount) || passengerCount < 1 || passengerCount > 10) return json({ error: "Choose between 1 and 10 passengers." }, 400);
   if ((passengerPhone.startsWith("467") || momoNumber.startsWith("467")) && TARGET_ENV !== "sandbox") return json({ error: "MTN sandbox test numbers cannot be used in production." }, 400);
 
+  // Server-side rate limits store hashes only; raw phone/IP values are not retained in this table.
+  const nowIso = new Date().toISOString();
+  const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+  const ipAddress = req.headers.get("cf-connecting-ip") || req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "";
+  const phoneHash = await sha256("guest-phone:" + momoNumber);
+  if (ipAddress) {
+    const ipHash = await sha256("guest-ip:" + ipAddress);
+    const { count: ipCount } = await supabase.from("security_rate_limit_events").select("id", { count: "exact", head: true })
+      .eq("bucket", "guest_ip").eq("subject_hash", ipHash).gte("created_at", cutoff);
+    if ((ipCount || 0) >= 8) return json({ error: "Too many checkout attempts from this connection. Please wait 15 minutes." }, 429);
+    await supabase.from("security_rate_limit_events").insert({ bucket: "guest_ip", subject_hash: ipHash, created_at: nowIso });
+  }
+  const { count: phoneAttempts } = await supabase.from("security_rate_limit_events").select("id", { count: "exact", head: true })
+    .eq("bucket", "guest_phone").eq("subject_hash", phoneHash).gte("created_at", cutoff);
+  if ((phoneAttempts || 0) >= 3) return json({ error: "Too many checkout attempts for this MoMo number. Please wait 15 minutes." }, 429);
+  await supabase.from("security_rate_limit_events").insert({ bucket: "guest_phone", subject_hash: phoneHash, created_at: nowIso });
+
   // Basic server-side abuse guard: limit repeated pending reservations for the same payer.
   const { count: recentCount, error: rateError } = await supabase.from("bookings")
     .select("id", { count: "exact", head: true })
