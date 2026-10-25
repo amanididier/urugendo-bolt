@@ -9,8 +9,8 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, Authorization, Apikey, X-Client-Info",
 };
 
-const MTN_BASE = "https://sandbox.momodeveloper.mtn.com";
 const TARGET_ENV = Deno.env.get("MTN_TARGET_ENV") || "sandbox";
+const MTN_BASE = TARGET_ENV === "sandbox" ? "https://sandbox.momodeveloper.mtn.com" : "https://momodeveloper.mtn.com";
 
 const SUBSCRIPTION_KEY = Deno.env.get("MTN_COLLECTION_SUBSCRIPTION_KEY");
 const API_USER_ID = Deno.env.get("MTN_API_USER_ID");
