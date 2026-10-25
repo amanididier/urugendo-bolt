@@ -11,6 +11,21 @@ Deno.serve(async (req: Request) => {
     const password = String(body.password || "");
     const agencyName = String(body.agencyName || "").trim();
     if (!email || !managerCode || !password) return json({ ok: false, reason: "missing_fields" }, 400);
+    const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const nowIso = new Date().toISOString();
+    const emailHash = await sha256("manager-email:" + email);
+    const { count: emailAttempts } = await db.from("security_rate_limit_events").select("id", { count: "exact", head: true })
+      .eq("bucket", "manager_email").eq("subject_hash", emailHash).gte("created_at", cutoff);
+    if ((emailAttempts || 0) >= 8) return json({ ok: false, reason: "rate_limited" }, 429);
+    const ipAddress = req.headers.get("cf-connecting-ip") || req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "";
+    if (ipAddress) {
+      const ipHash = await sha256("manager-ip:" + ipAddress);
+      const { count: ipAttempts } = await db.from("security_rate_limit_events").select("id", { count: "exact", head: true })
+        .eq("bucket", "manager_ip").eq("subject_hash", ipHash).gte("created_at", cutoff);
+      if ((ipAttempts || 0) >= 20) return json({ ok: false, reason: "rate_limited" }, 429);
+      await db.from("security_rate_limit_events").insert({ bucket: "manager_ip", subject_hash: ipHash, created_at: nowIso });
+    }
+    await db.from("security_rate_limit_events").insert({ bucket: "manager_email", subject_hash: emailHash, created_at: nowIso });
     const { data: manager, error } = await db.from("agency_managers")
       .select("id,name,email,manager_code,agency_name,password_hash,password_salt,password_iter,is_active")
       .eq("email", email).maybeSingle();
