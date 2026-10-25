@@ -389,10 +389,10 @@ export default function PaymentPage() {
           <div className="border-t border-slate-100" />
           <div className="flex justify-between">
             <span className="text-[14px] text-slate-500">
-              {t("seat", language)}
+              {language === "RW" ? "Icyicaro" : "Seat assignment"}
             </span>
             <span className="text-[14px] font-semibold text-slate-900">
-              {selectedSeat}
+              {language === "RW" ? "Kigenwa mu buryo bwikora" : "Assigned automatically"}
             </span>
           </div>
           <div className="border-t border-slate-100" />
