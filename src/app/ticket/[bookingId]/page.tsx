@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { useApp } from "@/context/app-context";
 import { QRCodeCanvas } from "qrcode.react";
@@ -155,6 +155,8 @@ function getTerminalName(city?: string): string {
 export default function TicketDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const guestToken = searchParams.get('access') || '';
   const { language } = useApp();
 
   const langKey = language === "RW" ? "rw" : "en";
@@ -181,7 +183,24 @@ export default function TicketDetailPage() {
     async function loadTicket() {
       setLoading(true);
       try {
-        let found = await fetchBookingById(bookingId);
+        let found: Booking | null = null;
+        if (guestToken) {
+          await supabase.functions.invoke('guest-checkout?action=status', { body: { bookingId, guestToken } });
+          const { data: guestData, error: guestError } = await supabase.functions.invoke('guest-checkout?action=ticket', { body: { bookingId, guestToken } });
+          if (!guestError && guestData?.booking) {
+            const row = guestData.booking;
+            found = {
+              id: row.id, shortCode: row.shortCode || row.bookingCode,
+              passengerName: row.passengerName, passengerPhone: row.passengerPhone,
+              seat: row.seatLabel, totalAmount: row.totalAmount,
+              status: row.status, paymentStatus: row.paymentStatus,
+              bookingDate: row.bookingDate, branchId: row.branchId,
+              momoAccountName: row.momoAccountName, trip: row.trip,
+            } as unknown as Booking;
+          }
+        } else {
+          found = await fetchBookingById(bookingId);
+        }
 
         if (!found) {
           const guestBookings = localStorage.getItem("guest_bookings");
@@ -228,7 +247,7 @@ export default function TicketDetailPage() {
     }
 
     if (bookingId) loadTicket();
-  }, [bookingId]);
+  }, [bookingId, guestToken]);
 
   const copyShortCode = () => {
     if (booking?.shortCode) {
