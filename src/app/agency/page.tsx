@@ -1389,16 +1389,7 @@ export default function AgencyDashboard() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => showToast("Trip scheduling is reserved for Branch Managers in the Urugendo Agency app.")}
-              className="bg-white rounded-xl py-3 border border-border flex items-center justify-center gap-2 shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all cursor-pointer"
-            >
-              <ShieldCheck size={16} className="text-primary" />
-              <span className="text-[12px] font-semibold text-text-primary">
-                Manager Schedule Only
-              </span>
-            </button>
+          <div className="grid grid-cols-1 gap-2">
             <button
               onClick={() => setActiveTab("verify")}
               className="bg-white rounded-xl py-3 border border-border flex items-center justify-center gap-2 shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all cursor-pointer"
