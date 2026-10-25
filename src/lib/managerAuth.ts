@@ -305,6 +305,7 @@ export function getStoredManager(): Omit<
   const email = localStorage.getItem("urugendo_manager_email");
   const code = localStorage.getItem("urugendo_manager_code");
   const agency = localStorage.getItem("urugendo_agency");
+  const sessionToken = localStorage.getItem("urugendo_manager_session_token") || "";
   if (!id || !email || !code || !agency) return null;
   return {
     id,
@@ -312,6 +313,7 @@ export function getStoredManager(): Omit<
     email,
     managerCode: code,
     agencyName: agency,
+    sessionToken,
     isActive: true,
     passwordIter: 100000,
   };
