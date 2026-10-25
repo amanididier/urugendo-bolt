@@ -815,12 +815,12 @@ export default function TicketDetailPage() {
             </div>
 
             <div className="pt-4 pb-4 px-4 border-t border-slate-100 flex flex-col items-center justify-center bg-white">
-              <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-2xs flex items-center justify-center">
+              <div className="relative bg-white p-3 rounded-2xl border border-slate-200/90 shadow-2xs flex items-center justify-center">
                 <QRCodeCanvas
                   value={qrPayload}
                   size={140}
                   bgColor={"#FFFFFF"}
-                  fgColor={"#0F172A"}
+                  fgColor={isUsed ? "#94A3B8" : isPending ? "#94A3B8" : "#00B14F"}
                   level={"M"}
                   includeMargin={false}
                 />
