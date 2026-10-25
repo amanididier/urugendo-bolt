@@ -12,9 +12,13 @@ import {
   Pencil,
   Check,
   Users,
-  ChevronDown,} from "lucide-react";
+  ChevronDown,
+  Sparkles,
+  ArrowRight,
+  X,
+} from "lucide-react";
 import { useApp } from "@/context/app-context";
-import { formatPrice } from "@/lib/data";
+import { formatPrice, generateShortCode } from "@/lib/data";
 import { normalizePhone } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { t } from "@/lib/translations";
@@ -31,7 +35,11 @@ export default function PaymentPage() {
   const router = useRouter();
   const {
     selectedTrip,
-    selectedSeat,    language,    userName,
+    selectedSeat,
+    addBooking,
+    language,
+    isLoggedIn,
+    userName,
     userPhone,
     search,
     groupPassengers,
@@ -41,12 +49,13 @@ export default function PaymentPage() {
   const [phone, setPhone] = useState(userPhone || "");
   const [momoName, setMomoName] = useState(userName || "");
   const [editablePassengerName, setEditablePassengerName] = useState(
-    userName || "",
+    userName || "Traveler",
   );
   const [isEditingName, setIsEditingName] = useState(false);
   const [state, setState] = useState<PayState>("idle");
   const [error, setError] = useState("");
   const [, setReferenceId] = useState("");
+  const [branchMomoCode, setBranchMomoCode] = useState<string | null>(null);
 
   // Group booking modal state & dropdown toggle state
   const groupCount = search.passengers > 1 ? search.passengers : 1;
@@ -55,8 +64,43 @@ export default function PaymentPage() {
   const [verificationPopup, setVerificationPopup] = useState(false);
   const [showGroupDropdown, setShowGroupDropdown] = useState(false);
 
+  // Pilot Phase Signup Notification Popup State (Rule 2)
+  const [showPilotPopup, setShowPilotPopup] = useState(false);
 
 
+  // Load branch MoMo code: branch table is source of truth (set by manager), NULL means not yet configured
+  useEffect(() => {
+    const storedBranchMomo =
+      localStorage.getItem("urugendo_branch_momo") ||
+      localStorage.getItem("urugendo_momo_code");
+    // Only use local cache if it looks like a real 6-7 digit code
+    if (storedBranchMomo && /^\d{6,7}$/.test(storedBranchMomo)) {
+      setBranchMomoCode(storedBranchMomo);
+    }
+    // Prefer the trip's origin_branch_id (FK-authoritative, never cross-agency).
+    // Fall back to name match only if the trip has no FK (legacy rows).
+    const tripBranchId = (selectedTrip as any)?.origin_branch_id || (selectedTrip as any)?.branch_id || null;
+    const tripFrom = (selectedTrip as any)?.from || (selectedTrip as any)?.route_from || search?.from;
+    (async () => {
+      try {
+        let data: any = null;
+        if (tripBranchId) {
+          const r = await supabase.from("branches").select("momo_code").eq("id", tripBranchId).maybeSingle();
+          data = r.data || null;
+        }
+        if (!data?.momo_code && tripFrom) {
+          const r2 = await supabase.from("branches").select("momo_code").ilike("name", tripFrom).limit(1).maybeSingle();
+          data = r2.data || null;
+        }
+        if (data?.momo_code && /^\d{6,7}$/.test(data.momo_code)) {
+          setBranchMomoCode(data.momo_code);
+          localStorage.setItem("urugendo_branch_momo", data.momo_code);
+        } else if (data && !data.momo_code) {
+          setBranchMomoCode(null);
+        }
+      } catch {}
+    })();
+  }, [selectedTrip, search?.from]);
 
   useEffect(() => {
     if (userName && !editablePassengerName) {
@@ -90,7 +134,9 @@ export default function PaymentPage() {
     );
   }
 
-  const perPersonTotal = selectedTrip.price;
+  const isFreePromo = isLoggedIn;
+  const bookingFee = isFreePromo ? 0 : Math.round(selectedTrip.price * 0.025);
+  const perPersonTotal = selectedTrip.price + bookingFee;
   const total = perPersonTotal * groupCount;
 
   const operatorObj =
@@ -126,7 +172,7 @@ export default function PaymentPage() {
       if (invokeError) throw new Error(invokeError.message || "Could not start MTN checkout.");
       if (data?.error) throw new Error(data.error);
       if (!data?.bookingId || !data?.guestToken) throw new Error("Checkout did not return secure ticket access.");
-      const ticketUrl = `/ticket/${encodeURIComponent(data.bookingId)}#access=${encodeURIComponent(data.guestToken)}`;
+      const ticketUrl = `/ticket/${encodeURIComponent(data.bookingId)}?access=${encodeURIComponent(data.guestToken)}&download=1`;
       setReferenceId(data.paymentReference || data.bookingCode || "");
       setState("awaiting_approval");
       setVerificationPopup(true);
@@ -246,19 +292,19 @@ export default function PaymentPage() {
               className="w-full max-w-sm bg-white rounded-[32px] p-6 text-center shadow-2xl"
             >
               <div className="w-14 h-14 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
-                {state === "success" ? <Check size={28} /> : <Clock size={28} />}
+                <Clock size={28} />
               </div>
               <h3 className="text-[18px] font-black text-slate-900 mb-2">
-                {state === "success"
-                  ? (language === "RW" ? "Bika itike yawe" : "Save your e-ticket")
-                  : (language === "RW" ? "Emeza ubwishyu kuri telefoni yawe" : "Approve payment on your phone")}
+                {language === "RW"
+                  ? "Kugenzura Biracyakomeza"
+                  : "Verification in Progress"}
               </h3>
               <p className="text-[13px] text-slate-600 leading-relaxed mb-4">
-                {state === "success"
-                  ? (language === "RW" ? "Ubwishyu bwemejwe. Bika itike yawe kuri telefoni." : "Payment confirmed. Your e-ticket is ready to save or download.")
-                  : (language === "RW" ? "Emeza ubutumwa bwa MTN MoMo kuri telefoni yawe." : "Approve the MTN MoMo prompt. Your ticket activates after the provider confirms payment.")}
+                {language === "RW"
+                  ? `Ubwishyu bwawe burimo kugenzurwa n'abakozi ba ${operatorName}. Tegereza gato.`
+                  : `Your payment is pending verification by ${operatorName} station agents. Please wait while your ticket enters verification.`}
               </p>
-              {state !== "success" && <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />}
+              <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
             </motion.div>
           </div>
         )}
@@ -447,6 +493,29 @@ export default function PaymentPage() {
         </div>
       </motion.div>
 
+      {/* MTN MoMo Code Card */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        className="mx-5 bg-[#FFCC00] rounded-[24px] p-5 mb-4 shadow-md text-slate-900 relative overflow-hidden"
+      >
+        <div className="absolute -right-6 -bottom-6 w-28 h-28 bg-white/20 rounded-full blur-xl pointer-events-none" />
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[12px] font-extrabold uppercase tracking-widest bg-black/10 px-3 py-1 rounded-full">
+            MTN momo code
+          </span>
+        </div>
+        <div className="text-[26px] font-black tracking-tight mb-1 font-mono">
+          {branchMomoCode ? `*${branchMomoCode}#` : "— Not yet set"}
+        </div>
+        <p className="text-[12px] font-semibold text-slate-800 opacity-90">
+          {language === "RW"
+            ? `Kode y'ishami rya ${operatorName}. Koresha wandika cyangwa wemeze hasi.`
+            : `A secure MTN MoMo prompt will be sent to your phone. Approve it to activate your ticket.`}
+        </p>
+      </motion.div>
+
       {/* Phone & MoMo Name Input */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
@@ -521,7 +590,8 @@ export default function PaymentPage() {
             state === "initiating" ||
             state === "awaiting_approval" ||
             state === "polling" ||
-            !phone
+            !phone ||
+            !branchMomoCode
           }
           className={`w-full h-14 rounded-2xl font-extrabold text-[15px] flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg ${
             state === "initiating" ||
