@@ -244,7 +244,7 @@ async function checkPaymentStatus(req: Request, supabase: any, userId: string) {
 
   const { data: payment } = await supabase
     .from("payments")
-    .select("*, booking:bookings(user_id)")
+    .select("*, booking:bookings(user_id, created_at)")
     .eq("provider_reference", referenceId)
     .maybeSingle();
   if (!payment || payment.booking?.user_id !== userId) {
