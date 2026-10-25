@@ -35,20 +35,38 @@ Deno.serve(async (req: Request) => {
     const url = new URL(req.url);
     const action = url.searchParams.get("action") || "initiate";
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
-    );
-
-    if (action === "status") {
-      return await checkPaymentStatus(req, supabase);
-    }
-
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const supabase = createClient(supabaseUrl, serviceKey);
     if (action === "webhook") {
+      const expected = Deno.env.get("MTN_WEBHOOK_SECRET");
+      if (!expected || req.headers.get("x-webhook-secret") !== expected) {
+        return new Response(JSON.stringify({ error: "Unauthorized webhook" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       return await handleWebhook(req, supabase);
     }
 
-    return await initiatePayment(req, supabase);
+    const authorization = req.headers.get("authorization") || "";
+    const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+    const publicKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
+    if (!token || !publicKey) {
+      return new Response(JSON.stringify({ error: "Sign in is required" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const authClient = createClient(supabaseUrl, publicKey, { auth: { persistSession: false, autoRefreshToken: false } });
+    const { data: authData, error: authError } = await authClient.auth.getUser(token);
+    if (authError || !authData.user) {
+      return new Response(JSON.stringify({ error: "Invalid session" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (action === "status") {
+      return await checkPaymentStatus(req, supabase, authData.user.id);
+    }
+    return await initiatePayment(req, supabase, authData.user.id);
   } catch (err: any) {
     return new Response(
       JSON.stringify({ error: err.message || "Internal server error" }),
@@ -87,7 +105,7 @@ async function getMtnAccessToken(): Promise<string> {
   return data.access_token;
 }
 
-async function initiatePayment(req: Request, supabase: any) {
+async function initiatePayment(req: Request, supabase: any, userId: string) {
   const body: PaymentRequest = await req.json();
   const { bookingId, amount, phone, currency = "RWF" } = body;
 
@@ -101,6 +119,38 @@ async function initiatePayment(req: Request, supabase: any) {
     );
   }
 
+  const { data: booking, error: bookingError } = await supabase
+    .from("bookings")
+    .select("id, user_id, total_amount, fare_amount, payment_status, status")
+    .eq("id", bookingId)
+    .maybeSingle();
+  if (bookingError || !booking) {
+    return new Response(JSON.stringify({ error: "Booking not found" }), {
+      status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  if (booking.user_id !== userId) {
+    return new Response(JSON.stringify({ error: "You cannot pay for this booking" }), {
+      status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  if (booking.payment_status === "verified" || booking.payment_status === "success") {
+    return new Response(JSON.stringify({ error: "This booking is already paid" }), {
+      status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  const normalizedPhone = String(phone).replace(/\\D/g, "");
+  if (!/^250[7-8]\\d{8}$/.test(normalizedPhone)) {
+    return new Response(JSON.stringify({ error: "Use a valid Rwanda MoMo number, including country code 250" }), {
+      status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  const trustedAmount = Number(booking.total_amount ?? booking.fare_amount ?? 0);
+  if (!Number.isFinite(trustedAmount) || trustedAmount <= 0) {
+    return new Response(JSON.stringify({ error: "Booking amount is invalid" }), {
+      status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
   const accessToken = await getMtnAccessToken();
   const referenceId = crypto.randomUUID();
 
@@ -117,10 +167,10 @@ async function initiatePayment(req: Request, supabase: any) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      amount: String(amount),
+      amount: String(trustedAmount),
       currency: mtnCurrency,
       externalId: bookingId,
-      payer: { partyIdType: "MSISDN", partyId: phone },
+      payer: { partyIdType: "MSISDN", partyId: normalizedPhone },
       payerMessage: body.payerMessage || "Urugendo bus ticket",
       payeeNote: body.payeeNote || "Urugendo booking",
     }),
@@ -150,7 +200,12 @@ async function initiatePayment(req: Request, supabase: any) {
     status: "pending",
   });
 
-  if (payError) console.error("Failed to record payment:", payError);
+  if (payError) {
+    console.error("Failed to record payment:", payError);
+    return new Response(JSON.stringify({ error: "MTN accepted the request but payment tracking could not be saved; contact support with reference " + referenceId }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 
   return new Response(
     JSON.stringify({
@@ -166,7 +221,7 @@ async function initiatePayment(req: Request, supabase: any) {
   );
 }
 
-async function checkPaymentStatus(req: Request, supabase: any) {
+async function checkPaymentStatus(req: Request, supabase: any, userId: string) {
   const url = new URL(req.url);
   const referenceId = url.searchParams.get("referenceId");
 
@@ -179,9 +234,14 @@ async function checkPaymentStatus(req: Request, supabase: any) {
 
   const { data: payment } = await supabase
     .from("payments")
-    .select("*")
+    .select("*, booking:bookings(user_id)")
     .eq("provider_reference", referenceId)
     .maybeSingle();
+  if (!payment || payment.booking?.user_id !== userId) {
+    return new Response(JSON.stringify({ error: "Payment not found" }), {
+      status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 
   if (payment && payment.status === "success") {
     return new Response(JSON.stringify({ status: "success", payment }), {
@@ -231,8 +291,9 @@ async function checkPaymentStatus(req: Request, supabase: any) {
     if (dbStatus === "success") {
       await supabase
         .from("bookings")
-        .update({ status: "upcoming" })
-        .eq("id", payment.booking_id);
+        .update({ status: "confirmed", payment_status: "verified" })
+        .eq("id", payment.booking_id)
+        .eq("user_id", userId);
     }
   }
 
