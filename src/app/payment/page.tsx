@@ -258,7 +258,7 @@ export default function PaymentPage() {
                   ? `Ubwishyu bwawe burimo kugenzurwa n'abakozi ba ${operatorName}. Tegereza gato.`
                   : `Approve the MTN prompt on your phone. Your ticket activates once payment is confirmed.`}
               </p>
-              <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+              {state !== "success" && <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />}
             </motion.div>
           </div>
         )}
