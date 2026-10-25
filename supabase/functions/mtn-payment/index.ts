@@ -79,6 +79,7 @@ Deno.serve(async (req: Request) => {
 });
 
 async function getMtnAccessToken(): Promise<string> {
+  if (!MTN_BASE) throw new Error("Set MTN_BASE_URL for non-sandbox MTN environments after MTN confirms your production endpoint.");
   if (!SUBSCRIPTION_KEY || !API_USER_ID || !API_KEY) {
     throw new Error(
       "MTN MoMo credentials not configured. Set MTN_COLLECTION_SUBSCRIPTION_KEY, MTN_API_USER_ID, MTN_API_KEY as edge function secrets.",
