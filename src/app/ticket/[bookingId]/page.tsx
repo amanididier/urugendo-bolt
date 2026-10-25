@@ -200,7 +200,7 @@ export default function TicketDetailPage() {
       if (guestToken || fragmentToken) window.history.replaceState({}, "", window.location.pathname + window.location.search);
       if (token !== guestToken) setGuestToken(token);
     }
-  }, [bookingId]);
+  }, [bookingId, guestToken]);
 
 
 
