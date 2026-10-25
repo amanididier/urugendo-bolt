@@ -83,17 +83,12 @@ async function listPublicTrips(body: any) {
   if (!trips?.length) return json({ trips: [] });
   const ids = trips.map((trip: any) => trip.id);
   const { data: bookings, error: bookingError } = await supabase.from("bookings")
-    .select("trip_id,passenger_count,status,created_at")
+    .select("trip_id,passenger_count,status")
     .in("trip_id", ids)
     .not("status", "in", '("rejected","cancelled","expired","past")');
   if (bookingError) throw new Error("Could not calculate seat availability.");
   const reserved = new Map<string, number>();
-  for (const booking of bookings || []) {
-    const stalePending = booking.status === "pending" && booking.created_at &&
-      Date.now() - new Date(booking.created_at).getTime() >= 15 * 60 * 1000;
-    if (stalePending) continue;
-    reserved.set(booking.trip_id, (reserved.get(booking.trip_id) || 0) + Math.max(1, Number(booking.passenger_count || 1)));
-  }
+  for (const booking of bookings || []) reserved.set(booking.trip_id, (reserved.get(booking.trip_id) || 0) + Math.max(1, Number(booking.passenger_count || 1)));
   return json({ trips: trips.map((trip: any) => ({
     id: trip.id, from: trip.route_from, to: trip.route_to,
     date: trip.travel_date || trip.date, departureTime: trip.departure_time,
