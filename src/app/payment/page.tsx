@@ -12,11 +12,7 @@ import {
   Pencil,
   Check,
   Users,
-  ChevronDown,
-  Sparkles,
-  ArrowRight,
-  X,
-} from "lucide-react";
+  ChevronDown,} from "lucide-react";
 import { useApp } from "@/context/app-context";
 import { formatPrice } from "@/lib/data";
 import { normalizePhone } from "@/lib/api";
