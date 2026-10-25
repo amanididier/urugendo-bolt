@@ -153,7 +153,13 @@ async function initiatePayment(req: Request, supabase: any, userId: string) {
       status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
-  const accessToken = await getMtnAccessToken();
+  let accessToken: string;
+  try {
+    accessToken = await getMtnAccessToken();
+  } catch (error: any) {
+    await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", bookingId).eq("user_id", userId);
+    return json({ error: error?.message || "Could not connect to MTN MoMo" }, 502);
+  }
   const referenceId = crypto.randomUUID();
 
   // MTN's sandbox accepts EUR, while Urugendo fares are stored in RWF.
