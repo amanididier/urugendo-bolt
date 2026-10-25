@@ -5,6 +5,8 @@ import type { Trip, Booking, Route } from "./types";
 export function normalizePhone(phone: string): string | null {
   if (!phone) return null;
   let cleaned = phone.replace(/\D/g, "");
+  // MTN sandbox test MSISDNs are accepted only when server-side sandbox mode is enabled.
+  if (/^4673312345[0-9]$/.test(cleaned) || /^4673312346[0-4]$/.test(cleaned)) return cleaned;
   if (cleaned.startsWith("250") && cleaned.length === 12) {
     return cleaned;
   }
