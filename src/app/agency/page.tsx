@@ -1391,12 +1391,12 @@ export default function AgencyDashboard() {
 
           <div className="grid grid-cols-2 gap-2">
             <button
-              onClick={() => router.push("/agency/schedule")}
+              onClick={() => showToast("Trip scheduling is reserved for Branch Managers in the Urugendo Agency app.")}
               className="bg-white rounded-xl py-3 border border-border flex items-center justify-center gap-2 shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all cursor-pointer"
             >
-              <Plus size={16} className="text-primary" />
+              <ShieldCheck size={16} className="text-primary" />
               <span className="text-[12px] font-semibold text-text-primary">
-                Add Schedule
+                Manager Schedule Only
               </span>
             </button>
             <button
