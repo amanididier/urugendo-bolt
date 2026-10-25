@@ -46,6 +46,7 @@ export interface ManagerLoginResult {
     | "agency_mismatch"
     | "bad_password";
   manager?: Omit<ManagerRecord, "passwordHash" | "passwordSalt">;
+  sessionToken?: string;
 }
 
 /**
@@ -147,7 +148,7 @@ export async function authenticateManager(
 
     const body: any = data;
     if (body?.ok && body?.manager) {
-      return { ok: true, manager: body.manager as Omit<ManagerRecord, "passwordHash" | "passwordSalt"> };
+      return { ok: true, manager: body.manager as Omit<ManagerRecord, "passwordHash" | "passwordSalt">, sessionToken: body.sessionToken };
     }
     return { ok: false, reason: (body?.reason as ManagerLoginResult["reason"]) || "bad_password" };
   } catch (err) {
@@ -318,9 +319,11 @@ export function getStoredManager(): Omit<
 
 export function persistManagerSession(
   manager: Omit<ManagerRecord, "passwordHash" | "passwordSalt">,
+  sessionToken?: string,
 ) {
   if (typeof window === "undefined") return;
   localStorage.setItem("urugendo_manager_id", manager.id);
+  localStorage.setItem("urugendo_manager_session_token", sessionToken || "");
   localStorage.setItem("urugendo_manager_name", manager.name);
   localStorage.setItem("urugendo_manager_email", manager.email);
   localStorage.setItem("urugendo_manager_code", manager.managerCode);
@@ -332,6 +335,7 @@ export function clearManagerSession() {
   if (typeof window === "undefined") return;
   // Remove the explicit manager keys...
   localStorage.removeItem("urugendo_manager_id");
+  localStorage.removeItem("urugendo_manager_session_token");
   localStorage.removeItem("urugendo_manager_name");
   localStorage.removeItem("urugendo_manager_email");
   localStorage.removeItem("urugendo_manager_code");
