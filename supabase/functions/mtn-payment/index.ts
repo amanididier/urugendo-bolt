@@ -296,6 +296,12 @@ async function checkPaymentStatus(req: Request, supabase: any, userId: string) {
         .update({ status: "confirmed", payment_status: "verified" })
         .eq("id", payment.booking_id)
         .eq("user_id", userId);
+    } else if (dbStatus === "failed") {
+      await supabase
+        .from("bookings")
+        .update({ status: "rejected", payment_status: "failed" })
+        .eq("id", payment.booking_id)
+        .eq("user_id", userId);
     }
   }
 
