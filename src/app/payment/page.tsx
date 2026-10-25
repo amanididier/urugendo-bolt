@@ -45,7 +45,7 @@ export default function PaymentPage() {
   const [phone, setPhone] = useState(userPhone || "");
   const [momoName, setMomoName] = useState(userName || "");
   const [editablePassengerName, setEditablePassengerName] = useState(
-    userName || "Traveler",
+    userName || "",
   );
   const [isEditingName, setIsEditingName] = useState(false);
   const [state, setState] = useState<PayState>("idle");
