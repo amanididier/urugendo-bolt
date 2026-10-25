@@ -639,7 +639,7 @@ function LoginContent() {
 
     // Success — persist session and redirect to manager dashboard.
     const mgr = result.manager!;
-    persistManagerSession(mgr);
+    persistManagerSession(mgr, result.sessionToken);
     setUserRole("manager");
     setShowManagerModal(false);
     router.push("/manager");
