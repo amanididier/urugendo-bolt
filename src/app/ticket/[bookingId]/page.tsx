@@ -167,7 +167,7 @@ export default function TicketDetailPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const guestToken = searchParams.get('access') || '';
+  const [guestToken, setGuestToken] = useState(searchParams.get('access') || '');
   const { language } = useApp();
 
   const langKey = language === "RW" ? "rw" : "en";
@@ -189,6 +189,20 @@ export default function TicketDetailPage() {
   const [dynamicBranchPhone, setDynamicBranchPhone] = useState(DEFAULT_PHONE);
 
   const pdfCardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const key = `urugendo_guest_ticket_${bookingId}`;
+    const fragmentToken = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("access") || "";
+    const token = guestToken || fragmentToken || window.sessionStorage.getItem(key) || "";
+    if (token) {
+      window.sessionStorage.setItem(key, token);
+      if (guestToken || fragmentToken) window.history.replaceState({}, "", window.location.pathname + window.location.search);
+      if (token !== guestToken) setGuestToken(token);
+    }
+  }, [bookingId]);
+
+
 
   useEffect(() => {
     async function loadTicket() {
