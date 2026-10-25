@@ -527,7 +527,6 @@ export default function PaymentPage() {
             state === "awaiting_approval" ||
             state === "polling" ||
             !phone ||
-            !
           }
           className={`w-full h-14 rounded-2xl font-extrabold text-[15px] flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg ${
             state === "initiating" ||
