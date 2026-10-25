@@ -35,11 +35,7 @@ export default function PaymentPage() {
   const router = useRouter();
   const {
     selectedTrip,
-    selectedSeat,
-    addBooking,
-    language,
-    isLoggedIn,
-    userName,
+    selectedSeat,    language,    userName,
     userPhone,
     search,
     groupPassengers,
@@ -65,39 +61,6 @@ export default function PaymentPage() {
 
 
 
-
-  useEffect(() => {
-    const storedBranchMomo =
-      localStorage.getItem("urugendo_branch_momo") ||
-      localStorage.getItem("urugendo_momo_code");
-    // Only use local cache if it looks like a real 6-7 digit code
-    if (storedBranchMomo && /^\d{6,7}$/.test(storedBranchMomo)) {
-      setBranchMomoCode(storedBranchMomo);
-    }
-    // Prefer the trip's origin_branch_id (FK-authoritative, never cross-agency).
-    // Fall back to name match only if the trip has no FK (legacy rows).
-    const tripBranchId = (selectedTrip as any)?.origin_branch_id || (selectedTrip as any)?.branch_id || null;
-    const tripFrom = (selectedTrip as any)?.from || (selectedTrip as any)?.route_from || search?.from;
-    (async () => {
-      try {
-        let data: any = null;
-        if (tripBranchId) {
-          const r = await supabase.from("branches").select("momo_code").eq("id", tripBranchId).maybeSingle();
-          data = r.data || null;
-        }
-        if (!data?.momo_code && tripFrom) {
-          const r2 = await supabase.from("branches").select("momo_code").ilike("name", tripFrom).limit(1).maybeSingle();
-          data = r2.data || null;
-        }
-        if (data?.momo_code && /^\d{6,7}$/.test(data.momo_code)) {
-          setBranchMomoCode(data.momo_code);
-          localStorage.setItem("urugendo_branch_momo", data.momo_code);
-        } else if (data && !data.momo_code) {
-          setBranchMomoCode(null);
-        }
-      } catch {}
-    })();
-  }, [selectedTrip, search?.from]);
 
   useEffect(() => {
     if (userName && !editablePassengerName) {
@@ -131,9 +94,8 @@ export default function PaymentPage() {
     );
   }
 
-  const isFreePromo = isLoggedIn;
-  const bookingFee = isFreePromo ? 0 : Math.round(selectedTrip.price * 0.025);
-  const perPersonTotal = selectedTrip.price + bookingFee;
+  const bookingFee = 0;
+  const perPersonTotal = selectedTrip.price;
   const total = perPersonTotal * groupCount;
 
   const operatorObj =
@@ -565,7 +527,7 @@ export default function PaymentPage() {
             state === "awaiting_approval" ||
             state === "polling" ||
             !phone ||
-            !branchMomoCode
+            !
           }
           className={`w-full h-14 rounded-2xl font-extrabold text-[15px] flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg ${
             state === "initiating" ||
