@@ -154,85 +154,51 @@ async function initiatePayment(req: Request, supabase: any, userId: string) {
       status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
-  let accessToken: string;
-  try {
-    accessToken = await getMtnAccessToken();
-  } catch (error: any) {
-    await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", bookingId).eq("user_id", userId);
-    return json({ error: error?.message || "Could not connect to MTN MoMo" }, 502);
-  }
   const referenceId = crypto.randomUUID();
-
-  // MTN's sandbox accepts EUR, while Urugendo fares are stored in RWF.
-  // Use a harmless €1 test request in sandbox; never send a RWF amount as EUR.
+  // MTN's sandbox accepts EUR; preserve the actual fare in RWF in Urugendo.
   const mtnCurrency = TARGET_ENV === "sandbox" ? "EUR" : "RWF";
   const mtnAmount = TARGET_ENV === "sandbox" ? "1" : String(trustedAmount);
 
-  let res: Response;
+  // Save the payment record before contacting MTN so an accepted request is always traceable.
+  const { error: payError } = await supabase.from("payments").insert({
+    booking_id: bookingId, provider: "mtn", phone_number: normalizedPhone,
+    amount: trustedAmount, currency: "RWF", provider_reference: referenceId, status: "pending",
+  });
+  if (payError) {
+    await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", bookingId).eq("user_id", userId);
+    return json({ error: "Could not create secure payment tracking. No payment request was sent." }, 500);
+  }
+
   try {
-    res = await fetch(`${MTN_BASE}/collection/v1_0/requesttopay`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "X-Reference-Id": referenceId,
-      "X-Target-Environment": TARGET_ENV,
-      "Ocp-Apim-Subscription-Key": SUBSCRIPTION_KEY!,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      amount: mtnAmount,
-      currency: mtnCurrency,
-      externalId: bookingId,
-      payer: { partyIdType: "MSISDN", partyId: normalizedPhone },
-      payerMessage: body.payerMessage || "Urugendo bus ticket",
-      payeeNote: body.payeeNote || "Urugendo booking",
-    }),
+    const accessToken = await getMtnAccessToken();
+    const res = await fetch(`${MTN_BASE}/collection/v1_0/requesttopay`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "X-Reference-Id": referenceId,
+        "X-Target-Environment": TARGET_ENV,
+        "Ocp-Apim-Subscription-Key": SUBSCRIPTION_KEY!,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        amount: mtnAmount, currency: mtnCurrency, externalId: bookingId,
+        payer: { partyIdType: "MSISDN", partyId: normalizedPhone },
+        payerMessage: body.payerMessage || "Urugendo bus ticket",
+        payeeNote: body.payeeNote || "Urugendo booking",
+      }),
     });
+    if (!res.ok && res.status !== 202) {
+      const errBody = await res.text();
+      await supabase.from("payments").update({ status: "failed" }).eq("provider_reference", referenceId);
+      await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", bookingId).eq("user_id", userId);
+      return json({ error: `MTN request failed (${res.status}): ${errBody}` }, 400);
+    }
+    return json({ referenceId, status: "pending", message: "Payment request sent to customer's phone. They must approve it." }, 202);
   } catch (error: any) {
+    await supabase.from("payments").update({ status: "failed" }).eq("provider_reference", referenceId);
     await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", bookingId).eq("user_id", userId);
     return json({ error: error?.message || "Could not connect to MTN MoMo" }, 502);
   }
-
-  if (!res.ok && res.status !== 202) {
-    const errBody = await res.text();
-    await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", bookingId).eq("user_id", userId);
-    return new Response(
-      JSON.stringify({ error: `MTN request failed (${res.status}): ${errBody}` }),
-      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
-  }
-
-  // Store the actual user currency (RWF) in your database
-  const { error: payError } = await supabase.from("payments").insert({
-    booking_id: bookingId,
-    provider: "mtn",
-    phone_number: normalizedPhone,
-    amount: trustedAmount,
-    currency: "RWF",
-    provider_reference: referenceId,
-    status: "pending",
-  });
-
-  if (payError) {
-    console.error("Failed to record payment:", payError);
-    await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", bookingId).eq("user_id", userId);
-    return new Response(JSON.stringify({ error: "MTN accepted the request but payment tracking could not be saved; contact support with reference " + referenceId }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
-  return new Response(
-    JSON.stringify({
-      referenceId,
-      status: "pending",
-      message:
-        "Payment request sent to customer's phone. They must approve it.",
-    }),
-    {
-      status: 202,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    },
-  );
 }
 
 async function checkPaymentStatus(req: Request, supabase: any, userId: string) {
@@ -257,6 +223,7 @@ async function checkPaymentStatus(req: Request, supabase: any, userId: string) {
     });
   }
 
+  if (payment && payment.status === "failed") return json({ status: "failed", message: "MTN did not confirm the payment. The seat reservation has been released." });
   if (payment && payment.status === "success") {
     return new Response(JSON.stringify({ status: "success", payment }), {
       status: 200,
