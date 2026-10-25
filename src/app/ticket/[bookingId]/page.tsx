@@ -365,7 +365,7 @@ export default function TicketDetailPage() {
       text: `My ticket from ${getCityName(booking?.trip?.from)} to ${getCityName(
         booking?.trip?.to,
       )}. Code: ${booking?.shortCode}`,
-      url: window.location.href,
+      url: guestToken ? `${window.location.origin}${window.location.pathname}#access=${encodeURIComponent(guestToken)}` : window.location.href,
     };
 
     if (navigator.share) {
