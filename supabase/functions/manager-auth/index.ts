@@ -37,7 +37,6 @@ Deno.serve(async (req: Request) => {
     const computed = await pbkdf2(password, String(manager.password_salt || ""), iterations);
     if (!constantTimeEqual(computed, String(manager.password_hash || "").trim())) return json({ ok: false, reason: "bad_password" }, 401);
     const safeManager = { id: manager.id, name: manager.name, email: manager.email, managerCode: manager.manager_code, agencyName: manager.agency_name, isActive: true, passwordIter: manager.password_iter || 100000 };
-    if (!body.native) return json({ ok: true, manager: safeManager });
     const tokenBytes = crypto.getRandomValues(new Uint8Array(32));
     const sessionToken = Array.from(tokenBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
     const tokenHash = await sha256(sessionToken);
