@@ -134,7 +134,7 @@ export default function SplashScreen() {
 
           <div className="space-y-3 pt-2">
             <button
-              onClick={continueAsPassenger}
+              onClick={() => router.push('/buy')}
               className="w-full h-13 bg-primary text-white font-extrabold text-[15px] rounded-2xl shadow-lg shadow-primary/30 flex items-center justify-center gap-2.5 active:scale-[0.98] transition-all cursor-pointer"
             >
               <span>{language === "RW" ? "Gura itike" : "Buy ticket"}</span>
