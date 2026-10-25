@@ -27,6 +27,7 @@ export interface ManagerRecord {
   passwordSalt: string;
   passwordIter: number;
   isActive: boolean;
+  sessionToken?: string;
 }
 
 export interface ManagerLoginInput {
