@@ -140,7 +140,9 @@ async function initiatePayment(req: Request, supabase: any, userId: string) {
     });
   }
   const normalizedPhone = String(phone).replace(/\\D/g, "");
-  if (!/^250[7-8]\\d{8}$/.test(normalizedPhone)) {
+  const validRwandaPhone = /^250[7-8]\\d{8}$/.test(normalizedPhone);
+  const validSandboxTestPhone = TARGET_ENV === "sandbox" && (/^4673312345[0-9]$/.test(normalizedPhone) || /^4673312346[0-4]$/.test(normalizedPhone));
+  if (!validRwandaPhone && !validSandboxTestPhone) {
     return new Response(JSON.stringify({ error: "Use a valid Rwanda MoMo number, including country code 250" }), {
       status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
