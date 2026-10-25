@@ -139,8 +139,8 @@ async function initiatePayment(req: Request, supabase: any, userId: string) {
       status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
-  const normalizedPhone = String(phone).replace(/\\D/g, "");
-  const validRwandaPhone = /^250[7-8]\\d{8}$/.test(normalizedPhone);
+  const normalizedPhone = String(phone).replace(/\D/g, "");
+  const validRwandaPhone = /^250[7-8]\d{8}$/.test(normalizedPhone);
   const validSandboxTestPhone = TARGET_ENV === "sandbox" && (/^4673312345[0-9]$/.test(normalizedPhone) || /^4673312346[0-4]$/.test(normalizedPhone));
   if (!validRwandaPhone && !validSandboxTestPhone) {
     return new Response(JSON.stringify({ error: "Use a valid Rwanda MoMo number, including country code 250" }), {
@@ -156,8 +156,10 @@ async function initiatePayment(req: Request, supabase: any, userId: string) {
   const accessToken = await getMtnAccessToken();
   const referenceId = crypto.randomUUID();
 
-  // Sandbox requires "EUR". We send "EUR" to MTN, but store "RWF" in Supabase.
+  // MTN's sandbox accepts EUR, while Urugendo fares are stored in RWF.
+  // Use a harmless €1 test request in sandbox; never send a RWF amount as EUR.
   const mtnCurrency = TARGET_ENV === "sandbox" ? "EUR" : currency;
+  const mtnAmount = TARGET_ENV === "sandbox" ? "1" : String(trustedAmount);
 
   const res = await fetch(`${MTN_BASE}/collection/v1_0/requesttopay`, {
     method: "POST",
@@ -169,7 +171,7 @@ async function initiatePayment(req: Request, supabase: any, userId: string) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      amount: String(trustedAmount),
+      amount: mtnAmount,
       currency: mtnCurrency,
       externalId: bookingId,
       payer: { partyIdType: "MSISDN", partyId: normalizedPhone },
@@ -195,9 +197,9 @@ async function initiatePayment(req: Request, supabase: any, userId: string) {
   const { error: payError } = await supabase.from("payments").insert({
     booking_id: bookingId,
     provider: "mtn",
-    phone_number: phone,
-    amount,
-    currency,
+    phone_number: normalizedPhone,
+    amount: trustedAmount,
+    currency: currency || "RWF",
     provider_reference: referenceId,
     status: "pending",
   });
