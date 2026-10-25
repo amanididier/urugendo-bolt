@@ -104,7 +104,7 @@ export default function BuyTicketPage() {
         if (status === "success" || status === "failed") return;
       }
       setMessage("Payment is still pending. You can keep checking here; the ticket will activate only after MTN confirms.");
-    } catch (e: any) { setPhase("failed"); setError(e?.message || "Checkout failed."); }
+    } catch (e: any) { setPhase(checkout ? "failed" : "details"); setError(e?.message || "Checkout failed."); }
     finally { setBusy(false); }
   };
 
