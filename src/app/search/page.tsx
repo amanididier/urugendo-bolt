@@ -171,7 +171,9 @@ export default function SearchPage() {
 
   const handleSelect = (trip: Trip) => {
     setSelectedTrip(trip);
-    router.push(`/seats/${trip.id}`);
+    // Public PWA checkout reserves capacity and does not ask users to select a seat.
+    setSelectedSeat("AUTO");
+    router.push("/payment");
   };
 
   const getSeatBadge = (available: number = 0) => {
