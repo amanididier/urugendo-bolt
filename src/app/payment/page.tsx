@@ -18,7 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { useApp } from "@/context/app-context";
-import { formatPrice, generateShortCode } from "@/lib/data";
+import { formatPrice } from "@/lib/data";
 import { normalizePhone } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { t } from "@/lib/translations";
@@ -55,7 +55,6 @@ export default function PaymentPage() {
   const [state, setState] = useState<PayState>("idle");
   const [error, setError] = useState("");
   const [, setReferenceId] = useState("");
-  const [branchMomoCode, setBranchMomoCode] = useState<string | null>(null);
 
   // Group booking modal state & dropdown toggle state
   const groupCount = search.passengers > 1 ? search.passengers : 1;
@@ -64,11 +63,9 @@ export default function PaymentPage() {
   const [verificationPopup, setVerificationPopup] = useState(false);
   const [showGroupDropdown, setShowGroupDropdown] = useState(false);
 
-  // Pilot Phase Signup Notification Popup State (Rule 2)
-  const [showPilotPopup, setShowPilotPopup] = useState(false);
 
 
-  // Load branch MoMo code: branch table is source of truth (set by manager), NULL means not yet configured
+
   useEffect(() => {
     const storedBranchMomo =
       localStorage.getItem("urugendo_branch_momo") ||
@@ -302,7 +299,7 @@ export default function PaymentPage() {
               <p className="text-[13px] text-slate-600 leading-relaxed mb-4">
                 {language === "RW"
                   ? `Ubwishyu bwawe burimo kugenzurwa n'abakozi ba ${operatorName}. Tegereza gato.`
-                  : `Your payment is pending verification by ${operatorName} station agents. Please wait while your ticket enters verification.`}
+                  : `Approve the MTN prompt on your phone. Your ticket activates once payment is confirmed.`}
               </p>
               <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
             </motion.div>
@@ -491,29 +488,6 @@ export default function PaymentPage() {
             </span>
           </div>
         </div>
-      </motion.div>
-
-      {/* MTN MoMo Code Card */}
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-        className="mx-5 bg-[#FFCC00] rounded-[24px] p-5 mb-4 shadow-md text-slate-900 relative overflow-hidden"
-      >
-        <div className="absolute -right-6 -bottom-6 w-28 h-28 bg-white/20 rounded-full blur-xl pointer-events-none" />
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-[12px] font-extrabold uppercase tracking-widest bg-black/10 px-3 py-1 rounded-full">
-            MTN momo code
-          </span>
-        </div>
-        <div className="text-[26px] font-black tracking-tight mb-1 font-mono">
-          {branchMomoCode ? `*${branchMomoCode}#` : "— Not yet set"}
-        </div>
-        <p className="text-[12px] font-semibold text-slate-800 opacity-90">
-          {language === "RW"
-            ? `Kode y'ishami rya ${operatorName}. Koresha wandika cyangwa wemeze hasi.`
-            : `A secure MTN MoMo prompt will be sent to your phone. Approve it to activate your ticket.`}
-        </p>
       </motion.div>
 
       {/* Phone & MoMo Name Input */}
