@@ -167,7 +167,9 @@ async function initiatePayment(req: Request, supabase: any, userId: string) {
   const mtnCurrency = TARGET_ENV === "sandbox" ? "EUR" : currency;
   const mtnAmount = TARGET_ENV === "sandbox" ? "1" : String(trustedAmount);
 
-  const res = await fetch(`${MTN_BASE}/collection/v1_0/requesttopay`, {
+  let res: Response;
+  try {
+    res = await fetch(`${MTN_BASE}/collection/v1_0/requesttopay`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -184,7 +186,11 @@ async function initiatePayment(req: Request, supabase: any, userId: string) {
       payerMessage: body.payerMessage || "Urugendo bus ticket",
       payeeNote: body.payeeNote || "Urugendo booking",
     }),
-  });
+    });
+  } catch (error: any) {
+    await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", bookingId).eq("user_id", userId);
+    return json({ error: error?.message || "Could not connect to MTN MoMo" }, 502);
+  }
 
   if (!res.ok && res.status !== 202) {
     const errBody = await res.text();
