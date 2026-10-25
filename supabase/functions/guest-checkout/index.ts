@@ -149,12 +149,22 @@ async function initiateGuestCheckout(body: any) {
   });
   if (bookingError || !booking) return json({ error: bookingError?.message || "Could not reserve seats for this trip." }, bookingError?.code === "P0001" ? 409 : 400);
   const saved = Array.isArray(booking) ? booking[0] : booking;
+  const referenceId = crypto.randomUUID();
+  // MTN sandbox accepts EUR only. A €1 sandbox test request is not the RWF fare.
+  const amount = TARGET_ENV === "sandbox" ? "1" : String(Number(saved.total_amount));
+  const currency = TARGET_ENV === "sandbox" ? "EUR" : "RWF";
+  // Persist the reference before calling MTN so an accepted request can never become untrackable.
+  const { error: paymentError } = await supabase.from("payments").insert({
+    booking_id: saved.id, provider: "mtn", phone_number: momoNumber,
+    amount: Number(saved.total_amount), currency: "RWF",
+    provider_reference: referenceId, status: "pending",
+  });
+  if (paymentError) {
+    await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", saved.id);
+    return json({ error: "Could not create secure payment tracking. No payment request was sent." }, 500);
+  }
   try {
     const token = await mtnAccessToken();
-    const referenceId = crypto.randomUUID();
-    // MTN sandbox accepts EUR only. A €1 sandbox test request is not the RWF fare.
-    const amount = TARGET_ENV === "sandbox" ? "1" : String(Number(saved.total_amount));
-    const currency = TARGET_ENV === "sandbox" ? "EUR" : "RWF";
     const response = await fetch(`${MTN_BASE}/collection/v1_0/requesttopay`, {
       method: "POST",
       headers: {
@@ -173,17 +183,9 @@ async function initiateGuestCheckout(body: any) {
     });
     if (!response.ok && response.status !== 202) {
       const detail = await response.text();
+      await supabase.from("payments").update({ status: "failed" }).eq("provider_reference", referenceId);
       await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", saved.id);
       return json({ error: `MTN payment request failed (${response.status}): ${detail}` }, 502);
-    }
-    const { error: paymentError } = await supabase.from("payments").insert({
-      booking_id: saved.id, provider: "mtn", phone_number: momoNumber,
-      amount: Number(saved.total_amount), currency: "RWF",
-      provider_reference: referenceId, status: "pending",
-    });
-    if (paymentError) {
-      await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", saved.id);
-      return json({ error: "Payment request started but tracking could not be saved. Contact support with reference " + referenceId }, 500);
     }
     return json({
       bookingId: saved.id, bookingCode: saved.booking_code, guestToken,
@@ -192,6 +194,7 @@ async function initiateGuestCheckout(body: any) {
       message: "Approve the MTN payment prompt on your phone. Your ticket will become active after MTN confirms payment.",
     }, 202);
   } catch (error: any) {
+    await supabase.from("payments").update({ status: "failed" }).eq("provider_reference", referenceId);
     await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", saved.id);
     return json({ error: error?.message || "Could not start MTN payment." }, 502);
   }
@@ -235,6 +238,7 @@ async function getGuestPaymentStatus(body: any) {
     .eq("booking_id", booking.id).eq("provider", "mtn").order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (!payment) return json({ status: booking.payment_status === "failed" ? "failed" : "pending", message: "No payment reference is recorded yet." });
   if (payment.status === "success") return json({ status: "success", bookingStatus: booking.status, paymentStatus: booking.payment_status });
+  if (payment.status === "failed") return json({ status: "failed", message: "MTN did not confirm the payment. The seat reservation has been released." });
   let mtnStatus = "PENDING";
   try {
     const token = await mtnAccessToken();
