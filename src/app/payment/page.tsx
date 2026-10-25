@@ -94,7 +94,6 @@ export default function PaymentPage() {
     );
   }
 
-  const bookingFee = 0;
   const perPersonTotal = selectedTrip.price;
   const total = perPersonTotal * groupCount;
 
