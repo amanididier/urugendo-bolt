@@ -6,7 +6,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 const TARGET_ENV = Deno.env.get("MTN_TARGET_ENV") || "sandbox";
-const MTN_BASE = Deno.env.get("MTN_BASE_URL") || (TARGET_ENV === "sandbox" ? "https://sandbox.momodeveloper.mtn.com" : "https://momoapi.mtn.co.rw");
+const MTN_BASE = Deno.env.get("MTN_BASE_URL") || (TARGET_ENV === "sandbox" ? "https://sandbox.momodeveloper.mtn.com" : "");
 const SUBSCRIPTION_KEY = Deno.env.get("MTN_COLLECTION_SUBSCRIPTION_KEY");
 const API_USER_ID = Deno.env.get("MTN_API_USER_ID");
 const API_KEY = Deno.env.get("MTN_API_KEY");
@@ -51,6 +51,7 @@ async function sha256(value: string) {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 async function mtnAccessToken() {
+  if (!MTN_BASE) throw new Error("Set MTN_BASE_URL for non-sandbox MTN environments after MTN confirms your production endpoint.");
   if (!SUBSCRIPTION_KEY || !API_USER_ID || !API_KEY) throw new Error("MTN MoMo credentials are not configured on the server.");
   const response = await fetch(`${MTN_BASE}/collection/token/`, {
     method: "POST",
