@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { useApp } from "@/context/app-context";
 import { QRCodeCanvas } from "qrcode.react";
@@ -166,8 +166,7 @@ function getTerminalName(city?: string): string {
 export default function TicketDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const [guestToken, setGuestToken] = useState(searchParams.get('access') || '');
+  const [guestToken, setGuestToken] = useState('');
   const { language } = useApp();
 
   const langKey = language === "RW" ? "rw" : "en";
@@ -193,11 +192,12 @@ export default function TicketDetailPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const key = `urugendo_guest_ticket_${bookingId}`;
+    const queryToken = new URLSearchParams(window.location.search).get("access") || "";
     const fragmentToken = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("access") || "";
-    const token = guestToken || fragmentToken || window.sessionStorage.getItem(key) || "";
+    const token = guestToken || queryToken || fragmentToken || window.sessionStorage.getItem(key) || "";
     if (token) {
       window.sessionStorage.setItem(key, token);
-      if (guestToken || fragmentToken) window.history.replaceState({}, "", window.location.pathname + window.location.search);
+      if (queryToken || fragmentToken) window.history.replaceState({}, "", window.location.pathname);
       if (token !== guestToken) setGuestToken(token);
     }
   }, [bookingId, guestToken]);
