@@ -18,7 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { useApp } from "@/context/app-context";
-import { formatPrice, generateShortCode } from "@/lib/data";
+import { formatPrice } from "@/lib/data";
 import { normalizePhone } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { t } from "@/lib/translations";
@@ -35,11 +35,7 @@ export default function PaymentPage() {
   const router = useRouter();
   const {
     selectedTrip,
-    selectedSeat,
-    addBooking,
-    language,
-    isLoggedIn,
-    userName,
+    selectedSeat,    language,    userName,
     userPhone,
     search,
     groupPassengers,
