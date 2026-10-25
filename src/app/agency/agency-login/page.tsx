@@ -393,15 +393,7 @@ function LoginContent() {
       }
 
       if (authData.user) {
-        await supabase.from("profiles").upsert({
-          id: authData.user.id,
-          full_name: fullName,
-          email,
-          operator_id: selectedOperator.id,
-          branch: selectedBranch,
-          role: "agent",
-          status: "pending",
-        });
+        // Agent profile role and operator assignment are created server-side after verified sign-in.
 
         // Insert agent — never force `id = auth.users.id` (agency_agents.id is
         // its own PK and the table has no user_id; forcing the auth id can 400).
