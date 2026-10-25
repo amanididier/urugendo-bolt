@@ -107,9 +107,9 @@ async function getMtnAccessToken(): Promise<string> {
 
 async function initiatePayment(req: Request, supabase: any, userId: string) {
   const body: PaymentRequest = await req.json();
-  const { bookingId, amount, phone, currency = "RWF" } = body;
+  const { bookingId, phone } = body;
 
-  if (!bookingId || !amount || !phone) {
+  if (!bookingId || !phone) {
     return new Response(
       JSON.stringify({ error: "Missing bookingId, amount, or phone" }),
       {
@@ -164,7 +164,7 @@ async function initiatePayment(req: Request, supabase: any, userId: string) {
 
   // MTN's sandbox accepts EUR, while Urugendo fares are stored in RWF.
   // Use a harmless €1 test request in sandbox; never send a RWF amount as EUR.
-  const mtnCurrency = TARGET_ENV === "sandbox" ? "EUR" : currency;
+  const mtnCurrency = TARGET_ENV === "sandbox" ? "EUR" : "RWF";
   const mtnAmount = TARGET_ENV === "sandbox" ? "1" : String(trustedAmount);
 
   let res: Response;
@@ -207,7 +207,7 @@ async function initiatePayment(req: Request, supabase: any, userId: string) {
     provider: "mtn",
     phone_number: normalizedPhone,
     amount: trustedAmount,
-    currency: currency || "RWF",
+    currency: "RWF",
     provider_reference: referenceId,
     status: "pending",
   });
