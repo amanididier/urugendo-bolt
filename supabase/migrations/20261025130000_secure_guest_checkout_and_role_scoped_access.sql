@@ -105,7 +105,8 @@ BEGIN
             AND b.status NOT IN ('rejected', 'cancelled', 'expired', 'past')
        ), 0), 0)
    WHERE t.id = v_trip_id;
-  RETURN COALESCE(NEW, OLD);
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
 END;
 $$;
 
