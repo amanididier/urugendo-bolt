@@ -131,7 +131,7 @@ export default function PaymentPage() {
       if (invokeError) throw new Error(invokeError.message || "Could not start MTN checkout.");
       if (data?.error) throw new Error(data.error);
       if (!data?.bookingId || !data?.guestToken) throw new Error("Checkout did not return secure ticket access.");
-      const ticketUrl = `/ticket/${encodeURIComponent(data.bookingId)}?access=${encodeURIComponent(data.guestToken)}&download=1`;
+      const ticketUrl = `/ticket/${encodeURIComponent(data.bookingId)}#access=${encodeURIComponent(data.guestToken)}`;
       setReferenceId(data.paymentReference || data.bookingCode || "");
       setState("awaiting_approval");
       setVerificationPopup(true);
