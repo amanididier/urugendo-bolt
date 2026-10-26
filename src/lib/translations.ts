@@ -19,6 +19,7 @@ type TranslationKey =
   | "rugendoHelp"
   | "cities"
   | "operators"
+  | "agencies"
   | "madeWith"
   | "busesFound"
   | "perSeat"
@@ -93,7 +94,17 @@ type TranslationKey =
   | "airtelMoney"
   | "bankCard"
   | "processing"
-  | "totalLabel";
+  | "totalLabel"
+  // Added for Tickets & Details Full Support
+  | "verificationPending"
+  | "ticketMissed"
+  | "ticketUsed"
+  | "passActive"
+  | "passMissed"
+  | "passUsed"
+  | "contactAgency"
+  | "aboutThisTrip"
+  | "scanQrPrompt";
 
 const translations: Record<TranslationKey, Record<Language, string>> = {
   // Home
@@ -104,7 +115,7 @@ const translations: Record<TranslationKey, Record<Language, string>> = {
   to: { EN: "To", RW: "Kujya" },
   toPlaceholder: { EN: "To (e.g. Musanze)", RW: "Kujya (urugero: Musanze)" },
   searchBuses: { EN: "Search Buses", RW: "Shakisha Bisi" },
-  popularRoutes: { EN: "Popular Routes", RW: "Inzira Zikunda" },
+  popularRoutes: { EN: "Popular Routes", RW: "Ingendo zikunzwe" },
   seeAll: { EN: "See all", RW: "Reba byose" },
   liveDepartures: { EN: "Live Departures", RW: "Gusohoka Mu Gihe" },
   live: { EN: "Live", RW: "Ubuzima" },
@@ -114,11 +125,12 @@ const translations: Record<TranslationKey, Record<Language, string>> = {
     EN: "Ask me about routes, prices, or booking help",
     RW: "Mbazanye ku nzira, ibiciro, cyangwa ubufasha bwo gutumiza",
   },
-  cities: { EN: "8 Cities", RW: "Umudugudu 8" },
-  operators: { EN: "4 Operators", RW: "Abakozi 4" },
+  cities: { EN: "Cities", RW: "imijyi" },
+  agencies: { EN: "Agencies", RW: "ibigo" },
+  operators: { EN: "Agencies", RW: "ibigo" },
   madeWith: {
     EN: "Made with 💚 for Rwanda's travellers",
-    RW: "Yakozwe n'💚 ku bagenzi b'u Rwanda",
+    RW: "Yakoranywe 💚 ku bw'abagenzi",
   },
 
   // Search
@@ -166,7 +178,7 @@ const translations: Record<TranslationKey, Record<Language, string>> = {
   to2: { EN: "To", RW: "Kujya" },
   date: { EN: "Date", RW: "Itariki" },
   time: { EN: "Time", RW: "Isaha" },
-  passenger: { EN: "Passenger", RW: "Umurwayi" },
+  passenger: { EN: "Passenger", RW: "Umugenzi" },
   downloadTicket: { EN: "Download Ticket", RW: "Kurura Ikarita" },
   shareTicket: { EN: "Share Ticket", RW: "Sangira Ikarita" },
   backHome: { EN: "Back to Home", RW: "Subira Ahande" },
@@ -177,8 +189,8 @@ const translations: Record<TranslationKey, Record<Language, string>> = {
     EN: "Manage your bus tickets",
     RW: "Genzura amakarita yawe ya bisi",
   },
-  upcoming: { EN: "Upcoming", RW: "Biraza" },
-  past: { EN: "Past", RW: "Byashize" },
+  upcoming: { EN: "Upcoming", RW: "izitarakoreshwa" },
+  past: { EN: "Past", RW: "izakoreshejwe" },
   cancelled: { EN: "Cancelled", RW: "Byavanywemo" },
   noUpcoming: {
     EN: "No upcoming trips. Book your next journey!",
@@ -220,9 +232,9 @@ const translations: Record<TranslationKey, Record<Language, string>> = {
   // Splash
   tagline: {
     EN: "Your personal secure journey app",
-    RW: "Porogaramu yawe y'urugendo rwizewe",
+    RW: "Porogaramu yizewe y'ingendo.",
   },
-  getStarted: { EN: "Get Started", RW: "Tangira" },
+  getStarted: { EN: "Book a Ticket", RW: "Gura itike" },
   orContinue: { EN: "or continue with", RW: "cyangwa komereza na" },
   noAccount: { EN: "Don't have an account? ", RW: "Ufite konti? " },
   createOne: { EN: "Create one", RW: "Fungura konti" },
@@ -243,6 +255,35 @@ const translations: Record<TranslationKey, Record<Language, string>> = {
   bankCard: { EN: "Bank Card", RW: "Ikarita ya Banki" },
   processing: { EN: "⏳ Processing...", RW: "⏳ Birakora..." },
   totalLabel: { EN: "Total", RW: "Igiteranyo" },
+
+  // Tickets full translation states
+  verificationPending: {
+    EN: "Verification Pending",
+    RW: "Kugenzura Biracyakorwa",
+  },
+  ticketMissed: { EN: "Trip Missed", RW: "Urugendo Rwagucitse" },
+  ticketUsed: { EN: "Ticket Used", RW: "Itike Yakoreshejwe" },
+  passActive: {
+    EN: "Your digital bus pass is active",
+    RW: "Itike yawe irakora",
+  },
+  passMissed: {
+    EN: "Departure time has passed",
+    RW: "Igihe cyo guhaguruka cyarenze",
+  },
+  passUsed: {
+    EN: "This ticket was verified & used",
+    RW: "Itike yagenzuwe n'abayobozi",
+  },
+  contactAgency: {
+    EN: "Contact Agency Support",
+    RW: "Vugana n'Abakozi ba Agence",
+  },
+  aboutThisTrip: { EN: "About This Trip", RW: "Ibyerekeye Uru Rugendo" },
+  scanQrPrompt: {
+    EN: "Scan QR at terminal gate for instant boarding",
+    RW: "Sikana kuri gate kugira ngo wemezwe vuba",
+  },
 };
 
 export function t(key: TranslationKey, lang: Language): string {

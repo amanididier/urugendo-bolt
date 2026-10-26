@@ -1,4 +1,5 @@
 import { City, Operator, Route, Trip, Booking } from "./types";
+import { supabase } from "./supabase";
 
 export const cities: City[] = [
   {
@@ -18,14 +19,6 @@ export const cities: City[] = [
       "https://images.unsplash.com/photo-1516426122078-c23e76319801?w=400&q=80",
   },
   {
-    code: "HYE",
-    name: "Huye",
-    terminal: "Huye Bus Terminal",
-    flag: "📚",
-    image:
-      "https://images.unsplash.com/photo-1596464716127-f2a82984de30?w=400&q=80",
-  },
-  {
     code: "RBV",
     name: "Rubavu",
     terminal: "Rubavu Terminal",
@@ -34,28 +27,36 @@ export const cities: City[] = [
       "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=400&q=80",
   },
   {
+    code: "GCB",
+    name: "Gicumbi",
+    terminal: "Gicumbi Terminal",
+    flag: "⛰️",
+    image:
+      "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=400&q=80",
+  },
+  {
+    code: "NYG",
+    name: "Nyagatare",
+    terminal: "Nyagatare Terminal",
+    flag: "🌄",
+    image:
+      "https://images.unsplash.com/photo-1501854140801-50d01698950b?w=400&q=80",
+  },
+  {
+    code: "HYE",
+    name: "Huye",
+    terminal: "Huye Bus Terminal",
+    flag: "📚",
+    image:
+      "https://images.unsplash.com/photo-1596464716127-f2a82984de30?w=400&q=80",
+  },
+  {
     code: "NYZ",
     name: "Nyanza",
     terminal: "Nyanza Terminal",
     flag: "👑",
     image:
       "https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=400&q=80",
-  },
-  {
-    code: "RWM",
-    name: "Rwamagana",
-    terminal: "Rwamagana Terminal",
-    flag: "🌄",
-    image:
-      "https://images.unsplash.com/photo-1501854140801-50d01698950b?w=400&q=80",
-  },
-  {
-    code: "BYM",
-    name: "Byumba",
-    terminal: "Byumba Terminal",
-    flag: "⛰️",
-    image:
-      "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=400&q=80",
   },
   {
     code: "CYG",
@@ -94,44 +95,48 @@ export const popularRoutes: Route[] = [
   {
     id: "2",
     from: "Kigali",
+    to: "Rubavu",
+    price: 4000,
+    duration: "3h 00m",
+    status: "active",
+  },
+  {
+    id: "3",
+    from: "Kigali",
+    to: "Gicumbi",
+    price: 2000,
+    duration: "1h 30m",
+    status: "active",
+  },
+  {
+    id: "4",
+    from: "Kigali",
+    to: "Nyagatare",
+    price: 3000,
+    duration: "2h 45m",
+    status: "active",
+  },
+  {
+    id: "5",
+    from: "Kigali",
     to: "Huye",
     price: 2500,
     duration: "2h 15m",
     status: "coming_soon",
   },
-  {
-    id: "3",
-    from: "Kigali",
-    to: "Rubavu",
-    price: 4000,
-    duration: "3h 00m",
-    status: "coming_soon",
-  },
-  {
-    id: "4",
-    from: "Kigali",
-    to: "Nyanza",
-    price: 1800,
-    duration: "1h 45m",
-    status: "coming_soon",
-  },
-  {
-    id: "5",
-    from: "Kigali",
-    to: "Rwamagana",
-    price: 1200,
-    duration: "1h 00m",
-    status: "coming_soon",
-  },
-  {
-    id: "6",
-    from: "Kigali",
-    to: "Byumba",
-    price: 2000,
-    duration: "1h 30m",
-    status: "coming_soon",
-  },
 ];
+
+export async function fetchDatabaseBranches(): Promise<string[]> {
+  try {
+    const { data, error } = await supabase.from("branches").select("name");
+    if (error || !data || data.length === 0) {
+      return ["Musanze", "Kigali", "Gicumbi", "Nyagatare", "Rubavu"];
+    }
+    return data.map((b: any) => b.name);
+  } catch {
+    return ["Musanze", "Kigali", "Gicumbi", "Nyagatare", "Rubavu"];
+  }
+}
 
 export function generateTrips(from: string, to: string, date: string): Trip[] {
   return [];

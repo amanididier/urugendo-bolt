@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { format } from "date-fns";
 import {
   Bell,
@@ -13,12 +13,16 @@ import {
   Zap,
   Navigation,
   Search,
+  Building2,
 } from "lucide-react";
 import { useApp } from "@/context/app-context";
-import { popularRoutes, formatPrice } from "@/lib/data";
-import { fetchTrips } from "@/lib/api";
-import { t } from "@/lib/translations";
+import { supabase } from "@/lib/supabase";
+import { formatPrice, fetchDatabaseBranches } from "@/lib/data";
+import { fetchTrips, fetchPopularRoutes } from "@/lib/api";
 import type { Trip } from "@/lib/types";
+import { Route } from "@/lib/types";
+import { t } from "@/lib/translations";
+import { useNotifications } from "@/lib/notifications";
 
 export default function HomePage() {
   const router = useRouter();
@@ -29,22 +33,16 @@ export default function HomePage() {
     setCityPickerField,
     setSelectedTrip,
     language,
+    branchNames,
   } = useApp();
 
+  const { unreadCount } = useNotifications();
   const [currentLocation, setCurrentLocation] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
-  const [liveTrips, setLiveTrips] = useState<Trip[]>([]);
-
-  const liveRoutes = popularRoutes.slice(0, 3);
-
-  // Load real dynamic trips from database on mount or search date change
-  useEffect(() => {
-    async function loadLiveTrips() {
-      const data = await fetchTrips(search.from, search.to, search.date);
-      setLiveTrips(data);
-    }
-    loadLiveTrips();
-  }, [search.from, search.to, search.date]);
+  const [showPopup, setShowPopup] = useState(false);
+  const [cityCount, setCityCount] = useState<number>(0);
+  const [agencyCount, setAgencyCount] = useState<number>(0);
+  const [homePopularRoutes, setHomePopularRoutes] = useState<Route[]>([]);
 
   const openCityPicker = (field: "from" | "to") => {
     setCityPickerField(field);
@@ -57,18 +55,23 @@ export default function HomePage() {
 
   const handleSearch = () => {
     if (search.from && search.to) {
+      const isKnown =
+        branchNames.includes(search.from) && branchNames.includes(search.to);
+      if (!isKnown) {
+        setShowPopup(true);
+        return;
+      }
       router.push("/search");
     }
   };
 
-  const handleRouteClick = (route: (typeof popularRoutes)[0]) => {
+  const handleRouteClick = (route: Route) => {
+    if (route.status === "coming_soon") {
+      setShowPopup(true);
+      return;
+    }
     setSearch({ from: route.from, to: route.to });
     router.push("/search");
-  };
-
-  const handleLiveDeparture = (trip: Trip) => {
-    setSelectedTrip(trip);
-    router.push(`/seats/${trip.id}`);
   };
 
   const useMyLocation = () => {
@@ -76,8 +79,8 @@ export default function HomePage() {
     setLocationLoading(true);
     navigator.geolocation.getCurrentPosition(
       () => {
-        setCurrentLocation("Nyabugogo, Kigali");
-        setSearch({ from: "Kigali", to: search.to });
+        setCurrentLocation("Musanze Central");
+        setSearch({ from: "Musanze", to: search.to });
         setLocationLoading(false);
       },
       () => setLocationLoading(false),
@@ -87,14 +90,76 @@ export default function HomePage() {
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        () => setCurrentLocation("Kigali Area"),
+        () => setCurrentLocation("Musanze Area"),
         () => {},
       );
     }
   }, []);
 
+  // Load dynamic stats for home page
+  useEffect(() => {
+    async function loadHomeStats() {
+      try {
+        // Get branches count (cities covered)
+        const branches = await fetchDatabaseBranches();
+        const cityCount = new Set(branches.map(b => b.split(',')[0].trim())).size; // Simplified distinct cities
+
+        // Get agencies count (operators)
+        const { data: operatorsData } = await supabase
+          .from("operators")
+          .select("id");
+        const agencyCount = operatorsData?.length || 0;
+
+        setCityCount(cityCount > 0 ? cityCount : 5); // fallback
+        setAgencyCount(agencyCount > 0 ? agencyCount : 3); // fallback
+
+        // Get popular routes for home page (top 3 by some criteria - for now just get some routes)
+        const popularRoutesData = await fetchPopularRoutes();
+        setHomePopularRoutes(popularRoutesData.slice(0, 3));
+      } catch (error) {
+        console.error("Failed to load home stats:", error);
+        // Set fallbacks
+        setCityCount(5);
+        setAgencyCount(3);
+        setHomePopularRoutes([]);
+      }
+    }
+
+    loadHomeStats();
+  }, []);
+
   return (
     <div className="bg-surface-secondary pb-[100px]">
+      {/* Apple-style popup for upcoming/unknown branches */}
+      <AnimatePresence>
+        {showPopup && (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-end justify-center p-4">
+            <motion.div
+              initial={{ y: 100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 100, opacity: 0 }}
+              className="w-full max-w-md bg-white rounded-[32px] p-6 shadow-2xl text-center mb-4"
+            >
+              <div className="w-12 h-12 bg-primary/10 text-primary rounded-2xl flex items-center justify-center mx-auto mb-3 font-bold">
+                <MapPin size={22} />
+              </div>
+              <h3 className="text-[17px] font-black text-slate-900 mb-1">
+                Route Branch Notice
+              </h3>
+              <p className="text-[13px] text-slate-600 leading-relaxed mb-5">
+                we are still starting but dont worry will be there soon
+              </p>
+              <button
+                onClick={() => setShowPopup(false)}
+                className="w-full h-12 bg-primary text-white font-bold text-[14px] rounded-2xl shadow-lg shadow-primary/25 cursor-pointer"
+              >
+                Got it
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
       <div className="bg-primary pt-[56px] px-5 pb-7 rounded-b-[32px] relative overflow-hidden">
         <div className="absolute -top-20 -right-16 w-56 h-56 rounded-full bg-white/8" />
@@ -119,9 +184,14 @@ export default function HomePage() {
               Urugendo<span className="text-accent">.</span>
             </h1>
           </motion.div>
-          <button className="w-10 h-10 rounded-full bg-white/15 flex items-center justify-center relative ring-1 ring-white/20 active:scale-90 transition-transform">
+          <button
+            onClick={() => router.push("/user-notifications")}
+            className="w-10 h-10 rounded-full bg-white/15 flex items-center justify-center relative ring-1 ring-white/20 active:scale-90 transition-transform cursor-pointer"
+          >
             <Bell size={20} className="text-white" />
-            <div className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-accent border-2 border-primary" />
+            {unreadCount > 0 && (
+              <div className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-accent border-2 border-primary" />
+            )}
           </button>
         </div>
 
@@ -148,7 +218,7 @@ export default function HomePage() {
       >
         <button
           onClick={() => openCityPicker("from")}
-          className="w-full flex items-center gap-3 py-2.5 active:opacity-60 transition-opacity"
+          className="w-full flex items-center gap-3 py-2.5 active:opacity-60 transition-opacity cursor-pointer"
         >
           <div className="w-3.5 h-3.5 rounded-full bg-primary flex-shrink-0 ring-2 ring-primary/15" />
           <span
@@ -165,7 +235,7 @@ export default function HomePage() {
         <div className="border-t border-dashed border-border relative">
           <button
             onClick={swapCities}
-            className="absolute right-0 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-primary text-white flex items-center justify-center z-10 active:scale-90 active:rotate-180 transition-all shadow-primary"
+            className="absolute right-0 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-primary text-white flex items-center justify-center z-10 active:scale-90 active:rotate-180 transition-all shadow-primary cursor-pointer"
           >
             <ArrowRightLeft size={14} />
           </button>
@@ -173,7 +243,7 @@ export default function HomePage() {
 
         <button
           onClick={() => openCityPicker("to")}
-          className="w-full flex items-center gap-3 py-2.5 active:opacity-60 transition-opacity"
+          className="w-full flex items-center gap-3 py-2.5 active:opacity-60 transition-opacity cursor-pointer"
         >
           <div className="w-3.5 h-3.5 rounded-full bg-accent flex-shrink-0 ring-2 ring-accent/15" />
           <span
@@ -189,21 +259,16 @@ export default function HomePage() {
         <button
           onClick={useMyLocation}
           disabled={locationLoading}
-          className="w-full flex items-center justify-center gap-2 py-2.5 text-primary text-[13px] font-medium active:opacity-60 transition-opacity"
+          className="w-full flex items-center justify-center gap-2 py-2.5 text-primary text-[13px] font-medium active:opacity-60 transition-opacity cursor-pointer"
         >
-          {locationLoading ? (
-            <span>Getting location...</span>
-          ) : currentLocation ? (
-            <>
-              <Navigation size={14} />
-              <span>Book from my location ({currentLocation})</span>
-            </>
-          ) : (
-            <>
-              <Navigation size={14} />
-              <span>Use my current location</span>
-            </>
-          )}
+          <Navigation size={14} />
+          <span>
+            {locationLoading
+              ? "Getting location..."
+              : currentLocation
+                ? `Book from my location (${currentLocation})`
+                : "Use my current location"}
+          </span>
         </button>
 
         <div className="border-t border-border" />
@@ -223,7 +288,7 @@ export default function HomePage() {
               onClick={() =>
                 setSearch({ passengers: Math.max(1, search.passengers - 1) })
               }
-              className="w-8 h-8 rounded-full bg-surface-secondary flex items-center justify-center text-primary text-[18px] font-bold active:scale-90 active:bg-primary-light transition-all"
+              className="w-8 h-8 rounded-full bg-surface-secondary flex items-center justify-center text-primary text-[18px] font-bold active:scale-90 transition-all cursor-pointer"
             >
               −
             </button>
@@ -234,7 +299,7 @@ export default function HomePage() {
               onClick={() =>
                 setSearch({ passengers: Math.min(10, search.passengers + 1) })
               }
-              className="w-8 h-8 rounded-full bg-surface-secondary flex items-center justify-center text-primary text-[18px] font-bold active:scale-90 active:bg-primary-light transition-all"
+              className="w-8 h-8 rounded-full bg-surface-secondary flex items-center justify-center text-primary text-[18px] font-bold active:scale-90 transition-all cursor-pointer"
             >
               +
             </button>
@@ -244,10 +309,10 @@ export default function HomePage() {
         <button
           onClick={handleSearch}
           disabled={!search.from || !search.to}
-          className={`w-full h-12 rounded-2xl font-bold text-white text-[15px] mt-1 flex items-center justify-center gap-2 transition-all ${
+          className={`w-full h-12 rounded-2xl font-bold text-white text-[15px] mt-1 flex items-center justify-center gap-2 transition-all cursor-pointer ${
             search.from && search.to
               ? "bg-primary shadow-primary active:scale-[0.97]"
-              : "bg-primary/25 text-primary/50"
+              : "bg-primary/25 text-primary/50 cursor-not-allowed"
           }`}
         >
           <Search size={16} />
@@ -265,13 +330,13 @@ export default function HomePage() {
         {[
           {
             icon: <MapPin size={14} />,
-            label: t("cities", language),
+            label: `${cityCount} ${t("cities", language)}`,
             bg: "bg-primary-light",
             color: "text-primary",
           },
           {
-            icon: <Zap size={14} />,
-            label: t("operators", language),
+            icon: <Building2 size={14} />,
+            label: `${agencyCount} ${t("agencies", language)}`,
             bg: "bg-amber-50",
             color: "text-accent",
           },
@@ -308,7 +373,7 @@ export default function HomePage() {
               {t("popularRoutes", language)}
             </h3>
           </div>
-          <button className="text-[13px] text-primary font-semibold">
+          <button className="text-[13px] text-primary font-semibold cursor-pointer">
             {t("seeAll", language)}
           </button>
         </div>
@@ -316,22 +381,17 @@ export default function HomePage() {
           className="flex gap-3 px-5 overflow-x-auto pb-1"
           style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
         >
-          {popularRoutes.map((route, i) => (
+          {homePopularRoutes.map((route, i) => (
             <motion.button
               key={route.id}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3 + i * 0.05 }}
-              onClick={() =>
-                route.status === "coming_soon"
-                  ? router.push("/waitlist")
-                  : handleRouteClick(route)
-              }
-              disabled={route.status === "coming_soon"}
-              className={`flex-shrink-0 rounded-2xl border p-4 min-w-[160px] active:scale-[0.97] transition-transform text-left ${
+              onClick={() => handleRouteClick(route)}
+              className={`flex-shrink-0 rounded-2xl border p-4 min-w-[160px] active:scale-[0.97] transition-transform text-left cursor-pointer ${
                 route.status === "coming_soon"
                   ? "bg-gray-50 border-gray-200 opacity-60"
-                  : "bg-white border-border shadow-card hover:shadow-card-lg transition-shadow"
+                  : "bg-white border-border shadow-card hover:shadow-card-lg"
               }`}
             >
               <div className="flex items-center gap-2 mb-2.5">
@@ -363,7 +423,7 @@ export default function HomePage() {
               </div>
               {route.status === "coming_soon" ? (
                 <div className="text-[12px] text-gray-400 font-medium">
-                  Coming Soon
+                  Soon Available
                 </div>
               ) : (
                 <>
@@ -377,114 +437,6 @@ export default function HomePage() {
               )}
             </motion.button>
           ))}
-        </div>
-      </motion.div>
-
-      {/* Live Departures */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.35 }}
-        className="px-4 mb-6"
-      >
-        <div className="flex items-center gap-2 mb-3">
-          <div className="w-1 h-5 rounded-full bg-primary" />
-          <h3 className="text-[17px] font-bold text-text-primary">
-            {t("liveDepartures", language)}
-          </h3>
-          <div className="flex items-center gap-1 bg-badge-green-bg px-2 py-0.5 rounded-full">
-            <motion.div
-              animate={{ opacity: [1, 0.2, 1] }}
-              transition={{ duration: 1.4, repeat: Infinity }}
-              className="w-1.5 h-1.5 rounded-full bg-badge-green-text"
-            />
-            <span className="text-[11px] font-bold text-badge-green-text">
-              {t("live", language)}
-            </span>
-          </div>
-        </div>
-
-        <div className="space-y-2.5">
-          {liveTrips.length > 0
-            ? liveTrips.slice(0, 4).map((trip, i) => {
-                const op = trip.operator as any;
-                const operatorName =
-                  typeof op === "string" ? op : op?.name || "Bus Operator";
-                const operatorGradient =
-                  typeof op === "object" && op?.gradient
-                    ? op.gradient
-                    : "linear-gradient(135deg, #FF6B1A, #FF8800)";
-                const operatorIcon =
-                  typeof op === "object" && (op?.emoji || op?.logo)
-                    ? op.emoji || op.logo
-                    : "🚌";
-
-                return (
-                  <motion.button
-                    key={trip.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.4 + i * 0.06 }}
-                    onClick={() => handleLiveDeparture(trip)}
-                    className="w-full bg-white rounded-2xl border border-border p-3.5 flex items-center gap-3 active:scale-[0.98] active:bg-primary-light transition-all shadow-card text-left"
-                  >
-                    <div
-                      className="w-11 h-11 rounded-2xl flex items-center justify-center text-lg flex-shrink-0"
-                      style={{
-                        background: operatorGradient,
-                      }}
-                    >
-                      {operatorIcon}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[14px] font-bold text-text-primary">
-                        {trip.from} → {trip.to}
-                      </div>
-                      <div className="text-[12px] text-text-muted mt-0.5">
-                        <span className="text-primary font-semibold">
-                          {operatorName}
-                        </span>
-                        <span className="mx-1.5">·</span>
-                        <span>{trip.departureTime}</span>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[16px] font-extrabold text-primary">
-                        {formatPrice(trip.price)}
-                      </div>
-                      <div className="text-[11px] text-badge-green-text font-medium">
-                        {trip.availableSeats} {t("seats", language)}
-                      </div>
-                    </div>
-                  </motion.button>
-                );
-              })
-            : liveRoutes.map((route) => (
-                <div
-                  key={route.id}
-                  onClick={() => handleRouteClick(route)}
-                  className="w-full bg-white rounded-2xl border border-border p-3.5 flex items-center justify-between shadow-card cursor-pointer"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-2xl bg-orange-100 flex items-center justify-center text-xl">
-                      🚌
-                    </div>
-                    <div>
-                      <div className="text-[14px] font-bold text-text-primary">
-                        {route.from} → {route.to}
-                      </div>
-                      <div className="text-[12px] text-text-muted">
-                        {route.duration}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-[16px] font-extrabold text-primary">
-                      {formatPrice(route.price)}
-                    </div>
-                  </div>
-                </div>
-              ))}
         </div>
       </motion.div>
 

@@ -9,8 +9,8 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, Authorization, Apikey, X-Client-Info",
 };
 
-const MTN_BASE = "https://sandbox.momodeveloper.mtn.com";
 const TARGET_ENV = Deno.env.get("MTN_TARGET_ENV") || "sandbox";
+const MTN_BASE = Deno.env.get("MTN_BASE_URL") || (TARGET_ENV === "sandbox" ? "https://sandbox.momodeveloper.mtn.com" : "https://momoapi.mtn.co.rw");
 
 const SUBSCRIPTION_KEY = Deno.env.get("MTN_COLLECTION_SUBSCRIPTION_KEY");
 const API_USER_ID = Deno.env.get("MTN_API_USER_ID");
@@ -35,20 +35,38 @@ Deno.serve(async (req: Request) => {
     const url = new URL(req.url);
     const action = url.searchParams.get("action") || "initiate";
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
-    );
-
-    if (action === "status") {
-      return await checkPaymentStatus(req, supabase);
-    }
-
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const supabase = createClient(supabaseUrl, serviceKey);
     if (action === "webhook") {
+      const expected = Deno.env.get("MTN_WEBHOOK_SECRET");
+      if (!expected || req.headers.get("x-webhook-secret") !== expected) {
+        return new Response(JSON.stringify({ error: "Unauthorized webhook" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       return await handleWebhook(req, supabase);
     }
 
-    return await initiatePayment(req, supabase);
+    const authorization = req.headers.get("authorization") || "";
+    const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+    const publicKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
+    if (!token || !publicKey) {
+      return new Response(JSON.stringify({ error: "Sign in is required" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const authClient = createClient(supabaseUrl, publicKey, { auth: { persistSession: false, autoRefreshToken: false } });
+    const { data: authData, error: authError } = await authClient.auth.getUser(token);
+    if (authError || !authData.user) {
+      return new Response(JSON.stringify({ error: "Invalid session" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (action === "status") {
+      return await checkPaymentStatus(req, supabase, authData.user.id);
+    }
+    return await initiatePayment(req, supabase, authData.user.id);
   } catch (err: any) {
     return new Response(
       JSON.stringify({ error: err.message || "Internal server error" }),
@@ -61,6 +79,7 @@ Deno.serve(async (req: Request) => {
 });
 
 async function getMtnAccessToken(): Promise<string> {
+  if (!MTN_BASE) throw new Error("Set MTN_BASE_URL for non-sandbox MTN environments after MTN confirms your production endpoint.");
   if (!SUBSCRIPTION_KEY || !API_USER_ID || !API_KEY) {
     throw new Error(
       "MTN MoMo credentials not configured. Set MTN_COLLECTION_SUBSCRIPTION_KEY, MTN_API_USER_ID, MTN_API_KEY as edge function secrets.",
@@ -73,6 +92,7 @@ async function getMtnAccessToken(): Promise<string> {
     method: "POST",
     headers: {
       "Ocp-Apim-Subscription-Key": SUBSCRIPTION_KEY,
+      "X-Target-Environment": TARGET_ENV,
       Authorization: `Basic ${basicAuth}`,
       "Content-Length": "0",
     },
@@ -87,11 +107,11 @@ async function getMtnAccessToken(): Promise<string> {
   return data.access_token;
 }
 
-async function initiatePayment(req: Request, supabase: any) {
+async function initiatePayment(req: Request, supabase: any, userId: string) {
   const body: PaymentRequest = await req.json();
-  const { bookingId, amount, phone, currency = "RWF" } = body;
+  const { bookingId, phone } = body;
 
-  if (!bookingId || !amount || !phone) {
+  if (!bookingId || !phone) {
     return new Response(
       JSON.stringify({ error: "Missing bookingId, amount, or phone" }),
       {
@@ -101,72 +121,90 @@ async function initiatePayment(req: Request, supabase: any) {
     );
   }
 
-  const accessToken = await getMtnAccessToken();
+  const { data: booking, error: bookingError } = await supabase
+    .from("bookings")
+    .select("id, user_id, total_amount, fare_amount, payment_status, status")
+    .eq("id", bookingId)
+    .maybeSingle();
+  if (bookingError || !booking) {
+    return new Response(JSON.stringify({ error: "Booking not found" }), {
+      status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  if (booking.user_id !== userId) {
+    return new Response(JSON.stringify({ error: "You cannot pay for this booking" }), {
+      status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  if (booking.payment_status === "verified" || booking.payment_status === "success") {
+    return new Response(JSON.stringify({ error: "This booking is already paid" }), {
+      status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  const normalizedPhone = String(phone).replace(/\D/g, "");
+  const validRwandaPhone = /^250[7-8]\d{8}$/.test(normalizedPhone);
+  const validSandboxTestPhone = TARGET_ENV === "sandbox" && (/^4673312345[0-9]$/.test(normalizedPhone) || /^4673312346[0-4]$/.test(normalizedPhone));
+  if (!validRwandaPhone && !validSandboxTestPhone) {
+    return new Response(JSON.stringify({ error: "Use a valid Rwanda MoMo number, including country code 250" }), {
+      status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  const trustedAmount = Number(booking.total_amount ?? booking.fare_amount ?? 0);
+  if (!Number.isFinite(trustedAmount) || trustedAmount <= 0) {
+    return new Response(JSON.stringify({ error: "Booking amount is invalid" }), {
+      status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
   const referenceId = crypto.randomUUID();
+  // MTN's sandbox accepts EUR; preserve the actual fare in RWF in Urugendo.
+  const mtnCurrency = TARGET_ENV === "sandbox" ? "EUR" : "RWF";
+  const mtnAmount = TARGET_ENV === "sandbox" ? "1" : String(trustedAmount);
 
-  // Sandbox requires "EUR". We send "EUR" to MTN, but store "RWF" in Supabase.
-  const mtnCurrency = TARGET_ENV === "sandbox" ? "EUR" : currency;
-
-  const res = await fetch(`${MTN_BASE}/collection/v1_0/requesttopay`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "X-Reference-Id": referenceId,
-      "X-Target-Environment": TARGET_ENV,
-      "Ocp-Apim-Subscription-Key": SUBSCRIPTION_KEY!,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      amount: String(amount),
-      currency: mtnCurrency,
-      externalId: bookingId,
-      payer: { partyIdType: "MSISDN", partyId: phone },
-      payerMessage: body.payerMessage || "Urugendo bus ticket",
-      payeeNote: body.payeeNote || "Urugendo booking",
-    }),
+  // Save the payment record before contacting MTN so an accepted request is always traceable.
+  const { error: payError } = await supabase.from("payments").insert({
+    booking_id: bookingId, provider: "mtn", phone_number: normalizedPhone,
+    amount: trustedAmount, currency: "RWF", provider_reference: referenceId, status: "pending",
   });
-
-  if (!res.ok && res.status !== 202) {
-    const errBody = await res.text();
-    return new Response(
-      JSON.stringify({
-        error: `MTN request failed (${res.status}): ${errBody}`,
-      }),
-      {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      },
-    );
+  if (payError) {
+    await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", bookingId).eq("user_id", userId);
+    return json({ error: "Could not create secure payment tracking. No payment request was sent." }, 500);
   }
 
-  // Store the actual user currency (RWF) in your database
-  const { error: payError } = await supabase.from("payments").insert({
-    booking_id: bookingId,
-    provider: "mtn",
-    phone_number: phone,
-    amount,
-    currency,
-    provider_reference: referenceId,
-    status: "pending",
-  });
-
-  if (payError) console.error("Failed to record payment:", payError);
-
-  return new Response(
-    JSON.stringify({
-      referenceId,
-      status: "pending",
-      message:
-        "Payment request sent to customer's phone. They must approve it.",
-    }),
-    {
-      status: 202,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    },
-  );
+  try {
+    const accessToken = await getMtnAccessToken();
+    const res = await fetch(`${MTN_BASE}/collection/v1_0/requesttopay`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "X-Reference-Id": referenceId,
+        "X-Target-Environment": TARGET_ENV,
+        "Ocp-Apim-Subscription-Key": SUBSCRIPTION_KEY!,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        amount: mtnAmount, currency: mtnCurrency, externalId: bookingId,
+        payer: { partyIdType: "MSISDN", partyId: normalizedPhone },
+        payerMessage: body.payerMessage || "Urugendo bus ticket",
+        payeeNote: body.payeeNote || "Urugendo booking",
+      }),
+    });
+    if (!res.ok && res.status !== 202) {
+      const errBody = await res.text();
+      await supabase.from("payments").update({ status: "failed" }).eq("provider_reference", referenceId);
+      await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", bookingId).eq("user_id", userId);
+      return json({ error: `MTN request failed (${res.status}): ${errBody}` }, 400);
+    }
+    return json({ referenceId, status: "pending", message: TARGET_ENV === "sandbox"
+      ? "Sandbox simulation started. No real money moves and no real MoMo PIN prompt is sent."
+      : "Payment request sent to the customer's phone. They must approve it in MTN MoMo." }, 202);
+  } catch (error: any) {
+    await supabase.from("payments").update({ status: "failed" }).eq("provider_reference", referenceId);
+    await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", bookingId).eq("user_id", userId);
+    return json({ error: error?.message || "Could not connect to MTN MoMo" }, 502);
+  }
 }
 
-async function checkPaymentStatus(req: Request, supabase: any) {
+async function checkPaymentStatus(req: Request, supabase: any, userId: string) {
   const url = new URL(req.url);
   const referenceId = url.searchParams.get("referenceId");
 
@@ -179,11 +217,18 @@ async function checkPaymentStatus(req: Request, supabase: any) {
 
   const { data: payment } = await supabase
     .from("payments")
-    .select("*")
+    .select("*, booking:bookings(user_id, created_at)")
     .eq("provider_reference", referenceId)
     .maybeSingle();
+  if (!payment || payment.booking?.user_id !== userId) {
+    return new Response(JSON.stringify({ error: "Payment not found" }), {
+      status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 
+  if (payment && payment.status === "failed") return json({ status: "failed", message: "MTN did not confirm the payment. The seat reservation has been released." });
   if (payment && payment.status === "success") {
+    await supabase.from("bookings").update({ status: "confirmed", payment_status: "verified" }).eq("id", payment.booking_id).eq("user_id", userId);
     return new Response(JSON.stringify({ status: "success", payment }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -204,23 +249,19 @@ async function checkPaymentStatus(req: Request, supabase: any) {
   );
 
   if (!res.ok) {
-    return new Response(
-      JSON.stringify({
-        status: "pending",
-        message: "Payment still processing",
-      }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      },
-    );
+    if (Date.now() - new Date(payment.booking?.created_at || 0).getTime() >= 15 * 60 * 1000) {
+      await supabase.from("payments").update({ status: "failed" }).eq("id", payment.id);
+      await supabase.from("bookings").update({ status: "rejected", payment_status: "failed" }).eq("id", payment.booking_id).eq("user_id", userId);
+      return json({ status: "failed", message: "Payment request expired. The seat reservation has been released." });
+    }
+    return json({ status: "pending", message: "Payment still processing" });
   }
 
   const mtnData = await res.json();
   const mtnStatus = mtnData.status;
   let dbStatus = "pending";
   if (mtnStatus === "SUCCESSFUL") dbStatus = "success";
-  else if (mtnStatus === "FAILED" || mtnStatus === "REJECTED")
+  else if (mtnStatus === "FAILED" || mtnStatus === "REJECTED" || mtnStatus === "EXPIRED")
     dbStatus = "failed";
 
   if (dbStatus !== "pending" && payment) {
@@ -231,8 +272,15 @@ async function checkPaymentStatus(req: Request, supabase: any) {
     if (dbStatus === "success") {
       await supabase
         .from("bookings")
-        .update({ status: "upcoming" })
-        .eq("id", payment.booking_id);
+        .update({ status: "confirmed", payment_status: "verified" })
+        .eq("id", payment.booking_id)
+        .eq("user_id", userId);
+    } else if (dbStatus === "failed") {
+      await supabase
+        .from("bookings")
+        .update({ status: "rejected", payment_status: "failed" })
+        .eq("id", payment.booking_id)
+        .eq("user_id", userId);
     }
   }
 
